@@ -606,7 +606,7 @@ def extract_pkd(text):
         for pattern in patterns:
             match = re.search(pattern, line, re.IGNORECASE)
             if match:
-                return {"value": match.group(1), "confidence": 0.90}
+                return {"value": re.sub(r"\s+", "", match.group(1)), "confidence": 0.90}
 
     label_pattern = re.compile(
         r"\b(?:"
@@ -627,7 +627,7 @@ def extract_pkd(text):
             for next_line in lines[i:i + 4]:
                 match = date_regex.search(next_line)
                 if match:
-                    return {"value": match.group(1), "confidence": 0.80}
+                    return {"value": re.sub(r"\s+", "", match.group(1)), "confidence": 0.80}
 
     return empty_result()
 
@@ -683,7 +683,7 @@ def extract_use_by(text):
             if match:
 
                 return {
-                    "value": match.group(1),
+                    "value": re.sub(r"\s+", "", match.group(1)),
                     "confidence": 0.90,
                 }
 
@@ -717,7 +717,7 @@ def extract_use_by(text):
                 if match:
 
                     return {
-                        "value": match.group(1),
+                        "value": re.sub(r"\s+", "", match.group(1)),
                         "confidence": 0.80,
                     }
 
@@ -759,6 +759,7 @@ def extract_dates(text):
         )
 
         for value in matches:
+            value = re.sub(r"\s+", "", value)
 
             if value not in found:
                 found.append(value)
