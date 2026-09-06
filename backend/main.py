@@ -513,74 +513,33 @@ def extract_batch(text):
 
     lines = normalized_lines(text)
 
-    # ========================================================
-    # SAME-LINE BATCH EXTRACTION
-    # ========================================================
-
     patterns = [
-
-        # B. NO: ABC123
         r"\bB\.?\s*NO\.?\s*[:\-]\s*"
         r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
 
-        # BATCH NO: ABC123
         r"\bBATCH\s*(?:NO\.?|NUMBER)"
         r"\s*[:\-]\s*"
         r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
 
-        # LOT NO: ABC123
         r"\bLOT\s*(?:NO\.?|NUMBER)"
         r"\s*[:\-]\s*"
         r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
 
-        # BATCH: ABC123
         r"\bBATCH\s*[:\-]\s*"
         r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
 
-        # LOT: ABC123
         r"\bLOT\s*[:\-]\s*"
         r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
     ]
 
     for line in lines:
-
         for pattern in patterns:
-
-            match = re.search(
-                pattern,
-                line,
-                re.IGNORECASE,
-            )
-
+            match = re.search(pattern, line, re.IGNORECASE)
             if not match:
                 continue
-
-            value = match.group(1).strip(
-                " .:-,;"
-            )
-
+            value = match.group(1).strip(" .:-,;")
             if is_valid_batch_value(value):
-
-                return {
-                    "value": value,
-                    "confidence": 0.90,
-                }
-
-    # ========================================================
-    # SEPARATE-LINE BATCH EXTRACTION
-    # ========================================================
-    #
-    # Only accept a strong batch code.
-    #
-    # Example:
-    #
-    # Batch No.:
-    # AB12345
-    #
-    # "UI" will be rejected.
-    # "LO" will be rejected.
-    # "JN" will be rejected.
-    #
+                return {"value": value, "confidence": 0.90}
 
     batch_label = re.compile(
         r"^\s*(?:"
@@ -591,35 +550,21 @@ def extract_batch(text):
         re.IGNORECASE,
     )
 
-    for next_line in lines[i + 1:i + 4]:
-
+    for i, line in enumerate(lines):
         if not batch_label.search(line):
             continue
-
-        # Only inspect the immediate next line.
-        # We do NOT search several lines away.
         if i + 1 >= len(lines):
             continue
-
         next_line = lines[i + 1].strip()
-
-        # The candidate must be basically just the code.
         candidate_match = re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9/_\-.]{2,29}",
             next_line,
         )
-
         if not candidate_match:
             continue
-
         value = candidate_match.group(0)
-
         if is_valid_batch_value(value):
-
-            return {
-                "value": value,
-                "confidence": 0.80,
-            }
+            return {"value": value, "confidence": 0.80}
 
     return empty_result()
 
@@ -644,42 +589,24 @@ def extract_pkd(text):
     )
 
     patterns = [
-
-        # PKD: date
         rf"\bP\.?\s*K\.?\s*D\.?\b"
         rf"\s*[:\-]?\s*{date_pattern}",
 
-        # PACKED ON: date
         rf"\bPACK(?:ED|ING)\s*(?:ON|DATE)?\b"
         rf"\s*[:\-]?\s*{date_pattern}",
 
-        # MFD: date
         rf"\bM\.?\s*F\.?\s*D\.?\b"
         rf"\s*[:\-]?\s*{date_pattern}",
 
-        # MANUFACTURED ON: date
         rf"\bMANUFACTURED\s*(?:ON|DATE)?\b"
         rf"\s*[:\-]?\s*{date_pattern}",
     ]
 
     for line in lines:
-
         for pattern in patterns:
-
-            match = re.search(
-                pattern,
-                line,
-                re.IGNORECASE,
-            )
-
+            match = re.search(pattern, line, re.IGNORECASE)
             if match:
-
-                return {
-                    "value": match.group(1),
-                    "confidence": 0.90,
-                }
-
-    # Separate-line detection
+                return {"value": match.group(1), "confidence": 0.90}
 
     label_pattern = re.compile(
         r"\b(?:"
@@ -693,31 +620,15 @@ def extract_pkd(text):
         re.IGNORECASE,
     )
 
-    date_regex = re.compile(
-        date_pattern,
-        re.IGNORECASE,
-    )
-        for i, line in enumerate(lines):
-        if not batch_label.search(line):
-            continue
-        # Only inspect the immediate next line.
-        # We do NOT search several lines away.
-        if i + 1 >= len(lines):
-            continue
-        next_line = lines[i + 1].strip()
-        # The candidate must be basically just the code.
-        candidate_match = re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9/_\-.]{2,29}",
-            next_line,
-        )
-        if not candidate_match:
-            continue
-        value = candidate_match.group(0)
-        if is_valid_batch_value(value):
-            return {
-                "value": value,
-                "confidence": 0.80,
-            }
+    date_regex = re.compile(date_pattern, re.IGNORECASE)
+
+    for i, line in enumerate(lines):
+        if label_pattern.search(line):
+            for next_line in lines[i:i + 4]:
+                match = date_regex.search(next_line)
+                if match:
+                    return {"value": match.group(1), "confidence": 0.80}
+
     return empty_result()
 
 
