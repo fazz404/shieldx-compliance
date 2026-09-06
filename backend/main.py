@@ -893,7 +893,6 @@ def preprocess_image(image):
 
     height, width = image.shape[:2]
 
-    # Upscale smaller images
     target_width = 2000
 
     if width < target_width:
@@ -914,71 +913,18 @@ def preprocess_image(image):
         cv2.COLOR_BGR2GRAY,
     )
 
-    # Keep preprocessing gentle.
-    # The original image is important because
-    # product labels often contain small printed text.
-
-    denoised = cv2.fastNlMeansDenoising(
-        gray,
-        None,
-        5,
-        5,
-        15,
-    )
-
     clahe = cv2.createCLAHE(
         clipLimit=1.5,
         tileGridSize=(8, 8),
     )
 
     enhanced = clahe.apply(
-        denoised
-    )
-
-    # Mild sharpening
-
-    kernel = np.array(
-        [
-            [0, -0.5, 0],
-            [-0.5, 3, -0.5],
-            [0, -0.5, 0],
-        ],
-        dtype=np.float32,
-    )
-
-    sharpened = cv2.filter2D(
-        enhanced,
-        -1,
-        kernel,
-    )
-
-    # OTSU
-
-    _, otsu = cv2.threshold(
-        sharpened,
-        0,
-        255,
-        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-    )
-
-    # Adaptive threshold
-
-    adaptive = cv2.adaptiveThreshold(
-        sharpened,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31,
-        8,
+        gray
     )
 
     return [
-        image,
         gray,
         enhanced,
-        sharpened,
-        otsu,
-        adaptive,
     ]
 
 # ============================================================
@@ -987,35 +933,13 @@ def preprocess_image(image):
 
 def run_ocr(image):
 
-    print("---- OCR DEBUG START ----")
-
-    try:
-        print("Tesseract path in use:", pytesseract.pytesseract.tesseract_cmd)
-    except Exception as exc:
-        print("Could not read tesseract_cmd:", exc)
-
-    print("TESSDATA_PREFIX env:", os.environ.get("TESSDATA_PREFIX"))
-
-    print("Image shape:", image.shape)
-    print("Image dtype:", image.dtype)
-    print("Image min/max:", image.min(), image.max())
-
     variants = preprocess_image(
         image
     )
 
-    for i, v in enumerate(variants):
-        print(
-            f"Variant {i} shape={v.shape} "
-            f"dtype={v.dtype} "
-            f"min={v.min()} max={v.max()}"
-        )
-
     psm_modes = [
         6,
         11,
-        12,
-        3,
     ]
 
     results = []
@@ -1037,24 +961,23 @@ def run_ocr(image):
                     config=config,
                 )
 
-                print(
-                    f"OCR pass "
-                    f"variant={variant_index} "
-                    f"psm={psm} "
-                    f"chars={len(text)} "
-                    f"repr={repr(text[:80])}"
-                )
-
                 if text and text.strip():
 
                     results.append(text)
 
+                    print(
+                        f"OCR pass "
+                        f"variant={variant_index} "
+                        f"psm={psm} "
+                        f"chars={len(text)}"
+                    )
+
             except Exception as exc:
 
                 print(
-                    f"OCR pass FAILED "
+                    f"OCR pass failed "
                     f"variant={variant_index} "
-                    f"psm={psm}: {repr(exc)}"
+                    f"psm={psm}: {exc}"
                 )
 
     combined = "\n".join(
@@ -1065,8 +988,6 @@ def run_ocr(image):
         f"Total OCR characters: "
         f"{len(combined)}"
     )
-
-    print("---- OCR DEBUG END ----")
 
     return combined
 # ============================================================
