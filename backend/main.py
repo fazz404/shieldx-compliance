@@ -1,26 +1,27 @@
-# ============================================================
-# PACKSURE BACKEND
-# OCR + FIELD EXTRACTION + COMPLIANCE ANALYSIS
-# ============================================================
-
+import os
 import re
+
 import cv2
 import numpy as np
 import pytesseract
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from rules import run_compliance_check
+from compliance import run_compliance_check
 
 
 # ============================================================
 # TESSERACT CONFIGURATION
 # ============================================================
 
-pytesseract.pytesseract.tesseract_cmd = (
-    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-)
+if os.name == "nt":
+    windows_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+    if os.path.exists(windows_tesseract):
+        pytesseract.pytesseract.tesseract_cmd = windows_tesseract
+else:
+    pytesseract.pytesseract.tesseract_cmd = "tesseract"
 
 
 # ============================================================
@@ -28,21 +29,18 @@ pytesseract.pytesseract.tesseract_cmd = (
 # ============================================================
 
 app = FastAPI(
-    title="PackSure API",
-    description="AI-Assisted Legal Metrology Compliance Platform",
-    version="1.0.0"
+    title="ShieldX Compliance Intelligence",
+    version="1.0.0",
 )
 
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "http://127.0.0.1:5173"
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -57,40 +55,52 @@ app.add_middleware(
 @app.get("/")
 def root():
     return {
-        "message": "PackSure Backend is running",
-        "status": "online"
+        "message": "ShieldX Backend is running",
+        "status": "online",
     }
 
 
 # ============================================================
-# NORMALIZE OCR TEXT
-# ============================================================
-
-def normalize_text(text):
-
-    if not text:
-        return ""
-
-    text = text.replace("\r", "\n")
-
-    # Normalize spaces but preserve new lines
-    text = re.sub(r"[ \t]+", " ", text)
-
-    # Remove excessive blank lines
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    return text.strip()
-
-
-# ============================================================
-# GENERIC RESULT
+# HELPERS
 # ============================================================
 
 def empty_result():
     return {
         "value": None,
-        "confidence": 0.0
+        "confidence": 0,
     }
+
+
+def clean_line(text):
+    text = text.replace("\x0c", " ")
+    text = re.sub(r"[\t ]+", " ", text)
+    return text.strip()
+
+
+def normalize_text(text):
+    if not text:
+        return ""
+
+    text = text.replace("\r", "\n")
+    text = text.replace("₹", " Rs. ")
+    text = text.replace("—", "-")
+    text = text.replace("–", "-")
+
+    return text
+
+
+def normalized_lines(text):
+    text = normalize_text(text)
+
+    lines = []
+
+    for line in text.splitlines():
+        line = clean_line(line)
+
+        if line:
+            lines.append(line)
+
+    return lines
 
 
 # ============================================================
@@ -99,14 +109,16 @@ def empty_result():
 
 def extract_license(text):
 
+    if not text:
+        return empty_result()
+
     patterns = [
 
-        r"\bLIC\.?\s*NO\.?\s*[:\-]?\s*([0-9]{8,20})",
+        r"\b(?:FSSAI|LICENCE|LICENSE|LIC\.?|LIC\s*NO\.?)"
+        r"\s*(?:NO\.?|NUMBER|NUM)?\s*[:\-]?\s*"
+        r"([0-9]{10,14})\b",
 
-        r"\bLICENSE\s*NO\.?\s*[:\-]?\s*([0-9]{8,20})",
-
-        r"\bLIC\s*NO\s*[:\-]?\s*([0-9]{8,20})"
-
+        r"\bFSSAI\b.{0,50}?([0-9]{10,14})\b",
     ]
 
     for pattern in patterns:
@@ -114,15 +126,33 @@ def extract_license(text):
         match = re.search(
             pattern,
             text,
-            re.IGNORECASE
+            re.IGNORECASE | re.DOTALL,
         )
 
         if match:
 
-            return {
-                "value": match.group(1),
-                "confidence": 0.95
-            }
+            value = match.group(1)
+
+            if len(value) >= 10:
+
+                return {
+                    "value": value,
+                    "confidence": 0.95,
+                }
+
+    # Safe fallback for long license-like numbers
+
+    candidates = re.findall(
+        r"\b[0-9]{10,14}\b",
+        text,
+    )
+
+    if candidates:
+
+        return {
+            "value": candidates[0],
+            "confidence": 0.70,
+        }
 
     return empty_result()
 
@@ -133,43 +163,58 @@ def extract_license(text):
 
 def extract_marketed_by(text):
 
+    if not text:
+        return empty_result()
+
+    lines = normalized_lines(text)
+
     patterns = [
 
-        r"MARKETED\s+BY\s*[:\-]?\s*([A-Z0-9&., ]+)",
+        r"(?:manufactured\s*(?:&|and)\s*marketed\s*by)"
+        r"\s*[:\-]?\s*(.+)",
 
-        r"MARKETED\s+BY\s*[:\-]?\s*([^\n]+)"
+        r"(?:mfg\.?\s*(?:&|and)\s*mkt\.?\s*by)"
+        r"\s*[:\-]?\s*(.+)",
 
+        r"(?:manufactured\s*and\s*marketed\s*by)"
+        r"\s*[:\-]?\s*(.+)",
+
+        r"(?:marketed\s*by)"
+        r"\s*[:\-]?\s*(.+)",
+
+        r"(?:mfg\.?\s*by)"
+        r"\s*[:\-]?\s*(.+)",
     ]
 
-    for pattern in patterns:
+    for line in lines:
 
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
+        for pattern in patterns:
 
-        if not match:
-            continue
+            match = re.search(
+                pattern,
+                line,
+                re.IGNORECASE,
+            )
 
-        value = match.group(1).strip()
+            if not match:
+                continue
 
-        # Remove trailing punctuation
-        value = re.sub(r"[,:;\-]+$", "", value).strip()
+            value = match.group(1).strip()
 
-        # Prevent address from becoming the company name
-        value = re.split(
-            r"\n|ROAD|RD\.|STREET|ST\.|KOLKATA|CHENNAI|MUMBAI|DELHI",
-            value,
-            flags=re.IGNORECASE
-        )[0].strip()
+            value = re.split(
+                r"\b(?:MRP|NET\s*WT|N\.?\s*QTY|"
+                r"B\.?\s*NO|BATCH|MFD|PKD|"
+                r"PACKED|USE\s*BY|EXPIRY)\b",
+                value,
+                flags=re.IGNORECASE,
+            )[0].strip(" :-.,;")
 
-        if len(value) > 2:
+            if len(value) >= 2:
 
-            return {
-                "value": value,
-                "confidence": 0.85
-            }
+                return {
+                    "value": value,
+                    "confidence": 0.90,
+                }
 
     return empty_result()
 
@@ -180,90 +225,188 @@ def extract_marketed_by(text):
 
 def extract_mrp(text):
 
+    """
+    Extract MRP only when an actual price is explicitly
+    associated with the MRP label.
+
+    Accepted examples:
+
+        MRP Rs. 20
+        MRP Rs 20
+        MRP INR 20
+        MRP ₹20
+        MRP: 20
+        MRP - 20
+        MRP 20
+
+    If OCR only detects:
+
+        MRP
+        MRP Rs.
+
+    without a real price, return NOT DETECTED.
+    """
+
+    if not text:
+        return empty_result()
+
+    normalized = normalize_text(text)
+
     patterns = [
 
         # MRP Rs. 50
-        r"\bM\.?\s*R\.?\s*P\.?\s*(?:RS\.?|INR|₹)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]{1,2})?)",
+        r"\bMRP\b\s*[:\-]?\s*"
+        r"(?:RS\.?|INR)\s*[:\-]?\s*"
+        r"([0-9]{1,6}(?:\.[0-9]{1,2})?)\b",
 
-        # MRP: Rs. 50
-        r"\bMRP\s*[:\-]\s*(?:RS\.?|INR|₹)?\s*([0-9]+(?:\.[0-9]{1,2})?)",
+        # M.R.P Rs. 50
+        r"\bM\.?\s*R\.?\s*P\.?\b\s*[:\-]?\s*"
+        r"(?:RS\.?|INR)\s*[:\-]?\s*"
+        r"([0-9]{1,6}(?:\.[0-9]{1,2})?)\b",
 
-        # MRP Rs. 50
-        r"\bMRP\s+RS\.?\s*([0-9]+(?:\.[0-9]{1,2})?)",
+        # MRP: 50
+        r"\bMRP\b\s*[:\-]\s*"
+        r"([0-9]{1,6}(?:\.[0-9]{1,2})?)\b",
 
-        # Rs. 50 near MRP
-        r"\bMRP\b.{0,20}?(?:RS\.?|INR|₹)\s*([0-9]+(?:\.[0-9]{1,2})?)"
-
+        # MRP 50
+        r"\bMRP\b\s+"
+        r"([0-9]{1,6}(?:\.[0-9]{1,2})?)\b",
     ]
 
     for pattern in patterns:
 
         match = re.search(
             pattern,
-            text,
-            re.IGNORECASE | re.DOTALL
+            normalized,
+            re.IGNORECASE,
         )
 
-        if match:
+        if not match:
+            continue
 
-            value = match.group(1)
+        value = match.group(1).strip()
+
+        try:
+
+            price = float(value)
+
+            if price <= 0:
+                continue
 
             return {
                 "value": f"Rs. {value}",
-                "confidence": 0.90
+                "confidence": 0.90,
             }
+
+        except ValueError:
+            continue
 
     return empty_result()
 
 
 # ============================================================
-# NET WEIGHT / NET CONTENT
+# NET WEIGHT
 # ============================================================
 
 def extract_net_weight(text):
 
-    patterns = [
+    """
+    IMPORTANT:
+
+    Net Weight is intentionally VERY strict.
+
+    We only accept a weight when the numeric value is
+    directly attached to the Net Weight / Net Qty label.
+
+    Example accepted:
+
+        NET WEIGHT: 500 g
+        NET WT: 500 g
+        NET QTY: 500 g
+        N. WT.: 500 g
+        N. QTY: 500 g
+
+    We DO NOT search nearby OCR lines.
+
+    Therefore:
+
+        NET WEIGHT:
+        8 ML
+
+    will NOT automatically be accepted.
+
+    This prevents random OCR text such as "8 ML"
+    from being incorrectly classified as Net Weight.
+    """
+
+    if not text:
+        return empty_result()
+
+    lines = normalized_lines(text)
+
+    weight_pattern = (
+        r"([0-9]+(?:\.[0-9]+)?)\s*"
+        r"(kg|kgs|g|gm|gms|mg|ml|l|ltr|litre|litres)\b"
+    )
+
+    direct_patterns = [
 
         # NET WEIGHT: 500 g
-        r"\bNET\s+WEIGHT\s*[:\-]?\s*"
-        r"([0-9]+(?:\.[0-9]+)?)\s*"
-        r"(g|kg|mg|ml|l)",
+        r"\bNET\s*(?:WEIGHT|WT\.?)\b"
+        r"\s*[:\-]\s*"
+        + weight_pattern,
 
-        # NET WEIGHT: newline 500 g
-        r"\bNET\s+WEIGHT\s*[:\-]?\s*"
-        r".{0,30}?"
-        r"([0-9]+(?:\.[0-9]+)?)\s*"
-        r"(g|kg|mg|ml|l)",
+        # NET WT 500 g
+        r"\bNET\s*(?:WEIGHT|WT\.?)\b"
+        r"\s+"
+        + weight_pattern,
 
-        # NET WT: 500 g
-        r"\bNET\s+WT\.?\s*[:\-]?\s*"
-        r"([0-9]+(?:\.[0-9]+)?)\s*"
-        r"(g|kg|mg|ml|l)",
+        # N. WT.: 500 g
+        r"\bN\.?\s*WT\.?\b"
+        r"\s*[:\-]\s*"
+        + weight_pattern,
 
-        # NET CONTENT: 500 g
-        r"\bNET\s+CONTENT\s*[:\-]?\s*"
-        r"([0-9]+(?:\.[0-9]+)?)\s*"
-        r"(g|kg|mg|ml|l)"
+        # N. QTY.: 500 g
+        r"\bN\.?\s*QTY\.?\b"
+        r"\s*[:\-]\s*"
+        + weight_pattern,
 
+        # NET QTY: 500 g
+        r"\bNET\s*QTY\.?\b"
+        r"\s*[:\-]\s*"
+        + weight_pattern,
     ]
 
-    for pattern in patterns:
+    for line in lines:
 
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE | re.DOTALL
-        )
+        for pattern in direct_patterns:
 
-        if match:
+            match = re.search(
+                pattern,
+                line,
+                re.IGNORECASE,
+            )
 
-            quantity = match.group(1)
-            unit = match.group(2).lower()
+            if not match:
+                continue
+
+            number = match.group(1)
+            unit = match.group(2)
 
             return {
-                "value": f"{quantity} {unit}",
-                "confidence": 0.88
+                "value": f"{number} {unit}",
+                "confidence": 0.90,
             }
+
+    # IMPORTANT:
+    # No separate-line detection here.
+    #
+    # This prevents:
+    #
+    # NET WEIGHT:
+    # 8 ML
+    #
+    # from being incorrectly extracted.
 
     return empty_result()
 
@@ -272,190 +415,447 @@ def extract_net_weight(text):
 # BATCH NUMBER
 # ============================================================
 
+def is_valid_batch_value(value):
+
+    """
+    Very strict batch validation.
+
+    Reject OCR garbage such as:
+
+        UI
+        LO
+        JN
+        LJ
+        NN
+        NO
+        NUMBER
+        BATCH
+        LOT
+
+    A realistic batch code normally has stronger structure,
+    such as:
+
+        AB1234
+        23AB91
+        A12345
+        LOT2025A
+        B24-0198
+    """
+
+    if not value:
+        return False
+
+    value = value.strip(" .:-,;")
+
+    if not value:
+        return False
+
+    cleaned = re.sub(
+        r"[^A-Za-z0-9/_\-.]",
+        "",
+        value,
+    )
+
+    if not cleaned:
+        return False
+
+    lower = cleaned.lower()
+
+    # Common OCR / label words
+    rejected_words = {
+        "no",
+        "number",
+        "batch",
+        "lot",
+        "bno",
+        "batchno",
+        "lotno",
+        "na",
+        "nil",
+        "none",
+    }
+
+    if lower in rejected_words:
+        return False
+
+    # Reject very short OCR noise.
+    if len(cleaned) < 4:
+        return False
+
+    # Maximum sensible batch length.
+    if len(cleaned) > 30:
+        return False
+
+    has_letter = bool(re.search(r"[A-Za-z]", cleaned))
+    has_digit = bool(re.search(r"[0-9]", cleaned))
+
+    # Strongest rule:
+    # Batch code should normally contain both letters and numbers.
+    if has_letter and has_digit:
+        return True
+
+    # Allow a purely numeric batch only when reasonably long.
+    if has_digit and not has_letter:
+        digits_only = re.sub(r"\D", "", cleaned)
+
+        if len(digits_only) >= 5:
+            return True
+
+    # Reject pure alphabetic OCR garbage.
+    return False
+
+
 def extract_batch(text):
+
+    if not text:
+        return empty_result()
+
+    lines = normalized_lines(text)
+
+    # ========================================================
+    # SAME-LINE BATCH EXTRACTION
+    # ========================================================
 
     patterns = [
 
-        r"\bBATCH\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*"
-        r"([A-Z0-9][A-Z0-9\/\-_]{1,})",
+        # B. NO: ABC123
+        r"\bB\.?\s*NO\.?\s*[:\-]\s*"
+        r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
 
-        r"\bBATCH\s*(?:NO\.?|NUMBER)?\s+"
-        r"([A-Z0-9][A-Z0-9\/\-_]{1,})",
+        # BATCH NO: ABC123
+        r"\bBATCH\s*(?:NO\.?|NUMBER)"
+        r"\s*[:\-]\s*"
+        r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
 
-        r"\bLOT\s*(?:NO\.?|NUMBER)?\s*[:\-]?\s*"
-        r"([A-Z0-9][A-Z0-9\/\-_]{1,})"
+        # LOT NO: ABC123
+        r"\bLOT\s*(?:NO\.?|NUMBER)"
+        r"\s*[:\-]\s*"
+        r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
 
+        # BATCH: ABC123
+        r"\bBATCH\s*[:\-]\s*"
+        r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
+
+        # LOT: ABC123
+        r"\bLOT\s*[:\-]\s*"
+        r"([A-Za-z0-9][A-Za-z0-9/_\-.]{2,29})",
     ]
 
-    invalid_values = {
-        "PKD",
-        "USE",
-        "BY",
-        "STORE",
-        "STOREINA",
-        "NET",
-        "WEIGHT",
-        "MRP"
-    }
+    for line in lines:
 
-    for pattern in patterns:
+        for pattern in patterns:
 
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
+            match = re.search(
+                pattern,
+                line,
+                re.IGNORECASE,
+            )
+
+            if not match:
+                continue
+
+            value = match.group(1).strip(
+                " .:-,;"
+            )
+
+            if is_valid_batch_value(value):
+
+                return {
+                    "value": value,
+                    "confidence": 0.90,
+                }
+
+    # ========================================================
+    # SEPARATE-LINE BATCH EXTRACTION
+    # ========================================================
+    #
+    # Only accept a strong batch code.
+    #
+    # Example:
+    #
+    # Batch No.:
+    # AB12345
+    #
+    # "UI" will be rejected.
+    # "LO" will be rejected.
+    # "JN" will be rejected.
+    #
+
+    batch_label = re.compile(
+        r"^\s*(?:"
+        r"B\.?\s*NO\.?"
+        r"|BATCH\s*(?:NO\.?|NUMBER)?"
+        r"|LOT\s*(?:NO\.?|NUMBER)?"
+        r")\s*[:\-]?\s*$",
+        re.IGNORECASE,
+    )
+
+    for i, line in enumerate(lines):
+
+        if not batch_label.search(line):
+            continue
+
+        # Only inspect the immediate next line.
+        # We do NOT search several lines away.
+        if i + 1 >= len(lines):
+            continue
+
+        next_line = lines[i + 1].strip()
+
+        # The candidate must be basically just the code.
+        candidate_match = re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9/_\-.]{2,29}",
+            next_line,
         )
 
-        if not match:
+        if not candidate_match:
             continue
 
-        value = match.group(1).strip()
+        value = candidate_match.group(0)
 
-        if value.upper() in invalid_values:
-            continue
+        if is_valid_batch_value(value):
 
-        # Batch numbers should normally contain a digit
-        if not re.search(r"\d", value):
-            continue
-
-        return {
-            "value": value,
-            "confidence": 0.80
-        }
+            return {
+                "value": value,
+                "confidence": 0.80,
+            }
 
     return empty_result()
 
 
 # ============================================================
-# PKD / PACKED DATE
+# PACKED / MANUFACTURED DATE
 # ============================================================
 
 def extract_pkd(text):
 
+    if not text:
+        return empty_result()
+
+    lines = normalized_lines(text)
+
+    date_pattern = (
+        r"([0-9]{1,2}"
+        r"[\/\-\.]"
+        r"[0-9]{1,2}"
+        r"[\/\-\.]"
+        r"[0-9]{2,4})"
+    )
+
     patterns = [
 
-        # PKD: 08/2026
-        r"\bPKD\.?\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{2,4})",
+        # PKD: date
+        rf"\bP\.?\s*K\.?\s*D\.?\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
 
-        # PKD: 08/08/2026
-        r"\bPKD\.?\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})",
+        # PACKED ON: date
+        rf"\bPACK(?:ED|ING)\s*(?:ON|DATE)?\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
 
-        # PKD: AUG 2026
-        r"\bPKD\.?\s*[:\-]?\s*"
-        r"([A-Z]{3,9}\s+[0-9]{4})"
+        # MFD: date
+        rf"\bM\.?\s*F\.?\s*D\.?\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
 
+        # MANUFACTURED ON: date
+        rf"\bMANUFACTURED\s*(?:ON|DATE)?\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
     ]
 
-    for pattern in patterns:
+    for line in lines:
 
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
+        for pattern in patterns:
 
-        if match:
+            match = re.search(
+                pattern,
+                line,
+                re.IGNORECASE,
+            )
 
-            value = match.group(1).strip()
+            if match:
 
-            return {
-                "value": value,
-                "confidence": 0.85
-            }
+                return {
+                    "value": match.group(1),
+                    "confidence": 0.90,
+                }
+
+    # Separate-line detection
+
+    label_pattern = re.compile(
+        r"\b(?:"
+        r"PKD"
+        r"|P\.?\s*K\.?\s*D"
+        r"|MFD"
+        r"|M\.?\s*F\.?\s*D"
+        r"|PACKED\s*(?:ON|DATE)?"
+        r"|MANUFACTURED\s*(?:ON|DATE)?"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    date_regex = re.compile(
+        date_pattern,
+        re.IGNORECASE,
+    )
+
+    for i, line in enumerate(lines):
+
+        if label_pattern.search(line):
+
+            for next_line in lines[i + 1:i + 4]:
+
+                match = date_regex.search(
+                    next_line
+                )
+
+                if match:
+
+                    return {
+                        "value": match.group(1),
+                        "confidence": 0.80,
+                    }
 
     return empty_result()
 
 
 # ============================================================
-# USE BY / BEST BEFORE / EXPIRY
+# USE BY / EXPIRY
 # ============================================================
 
 def extract_use_by(text):
 
+    if not text:
+        return empty_result()
+
+    lines = normalized_lines(text)
+
+    date_pattern = (
+        r"([0-9]{1,2}"
+        r"[\/\-\.]"
+        r"[0-9]{1,2}"
+        r"[\/\-\.]"
+        r"[0-9]{2,4})"
+    )
+
     patterns = [
 
-        # USE BY: 02/2027
-        r"\bUSE\s+BY\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{4})",
+        # USE BY
+        rf"\bUSE\s*BY\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
 
-        # USE BY: 02/02/2027
-        r"\bUSE\s+BY\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})",
+        # BEST BEFORE
+        rf"\bBEST\s*BEFORE\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
 
-        # BEST BEFORE: 02/2027
-        r"\bBEST\s+BEFORE\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{4})",
+        # EXPIRY
+        rf"\bEXP(?:IRY|IRES|\.)\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
 
-        # BEST BEFORE: 02/02/2027
-        r"\bBEST\s+BEFORE\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})",
-
-        # EXPIRY: 02/2027
-        r"\bEXP(?:IRY)?\.?\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{4})",
-
-        # EXPIRY: 02/02/2027
-        r"\bEXP(?:IRY)?\.?\s*[:\-]?\s*"
-        r"([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})"
-
+        # EXPIRES ON
+        rf"\bEXPIRES?\s*(?:ON|DATE)?\b"
+        rf"\s*[:\-]?\s*{date_pattern}",
     ]
 
-    for pattern in patterns:
+    for line in lines:
 
-        match = re.search(
-            pattern,
-            text,
-            re.IGNORECASE
-        )
+        for pattern in patterns:
 
-        if match:
+            match = re.search(
+                pattern,
+                line,
+                re.IGNORECASE,
+            )
 
-            return {
-                "value": match.group(1),
-                "confidence": 0.85
-            }
+            if match:
+
+                return {
+                    "value": match.group(1),
+                    "confidence": 0.90,
+                }
+
+    # Separate-line detection
+
+    label_pattern = re.compile(
+        r"\b(?:"
+        r"USE\s*BY"
+        r"|BEST\s*BEFORE"
+        r"|EXP(?:IRY|IRES)?"
+        r"|EXPIRES?"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    date_regex = re.compile(
+        date_pattern,
+        re.IGNORECASE,
+    )
+
+    for i, line in enumerate(lines):
+
+        if label_pattern.search(line):
+
+            for next_line in lines[i + 1:i + 4]:
+
+                match = date_regex.search(
+                    next_line
+                )
+
+                if match:
+
+                    return {
+                        "value": match.group(1),
+                        "confidence": 0.80,
+                    }
 
     return empty_result()
 
 
 # ============================================================
-# DATE EXTRACTION
+# DATE DETECTION
 # ============================================================
 
 def extract_dates(text):
 
+    if not text:
+
+        return {
+            "value": [],
+            "confidence": 0,
+        }
+
     patterns = [
 
-        r"\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b",
+        r"\b[0-9]{1,2}[\/\-\.]"
+        r"[0-9]{1,2}[\/\-\.]"
+        r"[0-9]{2,4}\b",
 
-        r"\b\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}\b",
-
-        r"\b\d{1,2}[\/\-]\d{4}\b",
-
-        r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
-        r"\s+\d{4}\b"
-
+        r"\b[0-9]{1,2}[\/\-\.]"
+        r"[A-Za-z]{3,9}[\/\-\.]"
+        r"[0-9]{2,4}\b",
     ]
 
-    dates = []
+    found = []
 
     for pattern in patterns:
 
         matches = re.findall(
             pattern,
             text,
-            re.IGNORECASE
+            re.IGNORECASE,
         )
 
-        dates.extend(matches)
+        for value in matches:
 
-    return list(dict.fromkeys(dates))
+            if value not in found:
+                found.append(value)
+
+    return {
+        "value": found,
+        "confidence": 0.80 if found else 0,
+    }
 
 
 # ============================================================
-# EXTRACT ALL FIELDS
+# ALL FIELD EXTRACTION
 # ============================================================
 
 def extract_fields(text):
@@ -481,8 +881,7 @@ def extract_fields(text):
             extract_pkd(text),
 
         "use_by":
-            extract_use_by(text)
-
+            extract_use_by(text),
     }
 
 
@@ -490,318 +889,437 @@ def extract_fields(text):
 # IMAGE PREPROCESSING
 # ============================================================
 
-def preprocess_images(image_bytes):
+def preprocess_image(image):
 
-    image_array = np.frombuffer(
-        image_bytes,
-        np.uint8
-    )
+    height, width = image.shape[:2]
 
-    image = cv2.imdecode(
-        image_array,
-        cv2.IMREAD_COLOR
-    )
+    # Upscale smaller images
+    target_width = 2000
 
-    if image is None:
+    if width < target_width:
 
-        raise ValueError(
-            "Unable to read uploaded image."
+        scale = target_width / width
+
+        new_width = int(width * scale)
+        new_height = int(height * scale)
+
+        image = cv2.resize(
+            image,
+            (new_width, new_height),
+            interpolation=cv2.INTER_CUBIC,
         )
-
-    # --------------------------------------------------------
-    # Original grayscale
-    # --------------------------------------------------------
 
     gray = cv2.cvtColor(
         image,
-        cv2.COLOR_BGR2GRAY
+        cv2.COLOR_BGR2GRAY,
     )
 
-    # --------------------------------------------------------
-    # Resize 3x
-    # --------------------------------------------------------
+    # Keep preprocessing gentle.
+    # The original image is important because
+    # product labels often contain small printed text.
 
-    resized = cv2.resize(
+    denoised = cv2.fastNlMeansDenoising(
         gray,
         None,
-        fx=3,
-        fy=3,
-        interpolation=cv2.INTER_CUBIC
+        5,
+        5,
+        15,
     )
 
-    # --------------------------------------------------------
-    # Slight denoising
-    # --------------------------------------------------------
-
-    denoised = cv2.GaussianBlur(
-        resized,
-        (3, 3),
-        0
+    clahe = cv2.createCLAHE(
+        clipLimit=1.5,
+        tileGridSize=(8, 8),
     )
 
-    # --------------------------------------------------------
-    # Contrast enhancement
-    # --------------------------------------------------------
-
-    enhanced = cv2.equalizeHist(
+    enhanced = clahe.apply(
         denoised
     )
 
-    # --------------------------------------------------------
-    # OTSU threshold
-    # --------------------------------------------------------
+    # Mild sharpening
 
-    _, threshold = cv2.threshold(
-        enhanced,
-        0,
-        255,
-        cv2.THRESH_BINARY +
-        cv2.THRESH_OTSU
+    kernel = np.array(
+        [
+            [0, -0.5, 0],
+            [-0.5, 3, -0.5],
+            [0, -0.5, 0],
+        ],
+        dtype=np.float32,
     )
 
-    # --------------------------------------------------------
+    sharpened = cv2.filter2D(
+        enhanced,
+        -1,
+        kernel,
+    )
+
+    # OTSU
+
+    _, otsu = cv2.threshold(
+        sharpened,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )
+
     # Adaptive threshold
-    # --------------------------------------------------------
 
     adaptive = cv2.adaptiveThreshold(
-        enhanced,
+        sharpened,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY,
         31,
-        11
+        8,
     )
 
     return [
-        resized,
+        image,
+        gray,
         enhanced,
-        threshold,
-        adaptive
+        sharpened,
+        otsu,
+        adaptive,
     ]
 
-
 # ============================================================
-# MULTI-PASS OCR
+# OCR
 # ============================================================
 
-def run_multi_pass_ocr(image_bytes):
+def run_ocr(image):
 
-    images = preprocess_images(
-        image_bytes
+    print("---- OCR DEBUG START ----")
+
+    try:
+        print("Tesseract path in use:", pytesseract.pytesseract.tesseract_cmd)
+    except Exception as exc:
+        print("Could not read tesseract_cmd:", exc)
+
+    print("TESSDATA_PREFIX env:", os.environ.get("TESSDATA_PREFIX"))
+
+    print("Image shape:", image.shape)
+    print("Image dtype:", image.dtype)
+    print("Image min/max:", image.min(), image.max())
+
+    variants = preprocess_image(
+        image
     )
+
+    for i, v in enumerate(variants):
+        print(
+            f"Variant {i} shape={v.shape} "
+            f"dtype={v.dtype} "
+            f"min={v.min()} max={v.max()}"
+        )
+
+    psm_modes = [
+        6,
+        11,
+        12,
+        3,
+    ]
 
     results = []
 
-    # Different PSM modes work better for different layouts
-    psm_modes = [
-        6,   # Uniform block of text
-        11,  # Sparse text
-        12   # Sparse text with OSD
-    ]
-
-    for image in images:
+    for variant_index, variant in enumerate(
+        variants
+    ):
 
         for psm in psm_modes:
 
             try:
 
+                config = (
+                    f"--oem 3 --psm {psm}"
+                )
+
                 text = pytesseract.image_to_string(
-                    image,
-                    config=f"--oem 3 --psm {psm}"
+                    variant,
+                    config=config,
+                )
+
+                print(
+                    f"OCR pass "
+                    f"variant={variant_index} "
+                    f"psm={psm} "
+                    f"chars={len(text)} "
+                    f"repr={repr(text[:80])}"
                 )
 
                 if text and text.strip():
 
-                    results.append(
-                        text.strip()
-                    )
+                    results.append(text)
 
-            except Exception as error:
+            except Exception as exc:
 
                 print(
-                    f"OCR pass failed (PSM {psm}):",
-                    error
+                    f"OCR pass FAILED "
+                    f"variant={variant_index} "
+                    f"psm={psm}: {repr(exc)}"
                 )
 
-    return results
-
-
-# ============================================================
-# COMBINE OCR RESULTS
-# ============================================================
-
-def combine_ocr_results(results):
-
-    if not results:
-        return ""
-
-    unique_lines = []
-    seen = set()
-
-    for result in results:
-
-        for line in result.splitlines():
-
-            line = line.strip()
-
-            if not line:
-                continue
-
-            # Normalize for duplicate detection
-            key = re.sub(
-                r"\s+",
-                " ",
-                line.lower()
-            )
-
-            if key in seen:
-                continue
-
-            seen.add(key)
-            unique_lines.append(line)
-
     combined = "\n".join(
-        unique_lines
+        results
     )
 
-    return normalize_text(
-        combined
+    print(
+        f"Total OCR characters: "
+        f"{len(combined)}"
     )
 
+    print("---- OCR DEBUG END ----")
 
+    return combined
 # ============================================================
-# UPLOAD ENDPOINT
+# UPLOAD / ANALYSIS
 # ============================================================
 
 @app.post("/upload")
-async def upload_product(
+async def upload_file(
     file: UploadFile = File(...)
 ):
 
-    # --------------------------------------------------------
-    # Validate file
-    # --------------------------------------------------------
+    if not file:
 
-    if not file.content_type:
+        raise HTTPException(
+            status_code=400,
+            detail="No file uploaded.",
+        )
 
-        return {
-            "error":
-                "File type could not be determined."
-        }
+    allowed_types = {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/jpg",
+    }
 
-    if not file.content_type.startswith(
-        "image/"
-    ):
+    if file.content_type not in allowed_types:
 
-        return {
-            "error":
-                "Please upload an image file."
-        }
-
-    # --------------------------------------------------------
-    # Read image
-    # --------------------------------------------------------
-
-    image_bytes = await file.read()
-
-    if not image_bytes:
-
-        return {
-            "error":
-                "Uploaded image is empty."
-        }
-
-    # --------------------------------------------------------
-    # OCR
-    # --------------------------------------------------------
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a valid image.",
+        )
 
     try:
 
-        ocr_results = run_multi_pass_ocr(
-            image_bytes
+        # ----------------------------------------------------
+        # Check Tesseract
+        # ----------------------------------------------------
+
+        try:
+
+            version = (
+                pytesseract
+                .get_tesseract_version()
+            )
+
+            print(
+                f"Tesseract version: "
+                f"{version}"
+            )
+
+        except Exception as exc:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Tesseract OCR is not "
+                    "available: "
+                    f"{str(exc)}"
+                ),
+            )
+
+        # ----------------------------------------------------
+        # Read image
+        # ----------------------------------------------------
+
+        contents = await file.read()
+
+        if not contents:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded image is empty.",
+            )
+
+        image_array = np.frombuffer(
+            contents,
+            dtype=np.uint8,
         )
 
-        extracted_text = combine_ocr_results(
-            ocr_results
+        image = cv2.imdecode(
+            image_array,
+            cv2.IMREAD_COLOR,
         )
 
-    except Exception as error:
+        if image is None:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Unable to read uploaded image.",
+            )
 
         print(
-            "OCR Error:",
-            error
+            f"Image received: "
+            f"{image.shape[1]}x"
+            f"{image.shape[0]}"
         )
 
-        return {
-            "error":
-                "OCR processing failed.",
+        # ----------------------------------------------------
+        # OCR
+        # ----------------------------------------------------
 
-            "details":
-                str(error)
+        ocr_text = run_ocr(
+            image
+        )
+
+        # ----------------------------------------------------
+        # No OCR result
+        # ----------------------------------------------------
+
+        if not ocr_text.strip():
+
+            empty_fields = extract_fields(
+                ""
+            )
+
+            empty_fields[
+                "dates_detected"
+            ] = {
+                "value": [],
+                "confidence": 0,
+            }
+
+            return {
+
+                "extracted_text": "",
+
+                "fields": empty_fields,
+
+                "compliance": {
+
+                    "summary": {
+
+                        "status":
+                            "NEEDS REVIEW",
+
+                        "evaluated_fields":
+                            0,
+
+                        "total_checks":
+                            7,
+
+                        "verification_coverage":
+                            0,
+
+                        "evaluation_score":
+                            0,
+
+                        "passed":
+                            0,
+
+                        "needs_review":
+                            0,
+
+                        "not_detected":
+                            7,
+
+                        "failed":
+                            0,
+                    },
+
+                    "checks": [],
+                },
+            }
+
+        # ----------------------------------------------------
+        # OCR DEBUG
+        # ----------------------------------------------------
+
+        print(
+            "\n========== OCR TEXT ==========\n"
+        )
+
+        print(
+            ocr_text[:10000]
+        )
+
+        print(
+            "\n==============================\n"
+        )
+
+        # ----------------------------------------------------
+        # Extract fields
+        # ----------------------------------------------------
+
+        fields = extract_fields(
+            ocr_text
+        )
+
+        fields[
+            "dates_detected"
+        ] = extract_dates(
+            ocr_text
+        )
+
+        print(
+            "EXTRACTED FIELDS:",
+            fields,
+        )
+
+        # ----------------------------------------------------
+        # Compliance
+        # ----------------------------------------------------
+
+        compliance = (
+            run_compliance_check(
+                fields,
+                ocr_text,
+            )
+        )
+
+        # ----------------------------------------------------
+        # Final response
+        # ----------------------------------------------------
+
+        response = {
+
+            "extracted_text":
+                ocr_text,
+
+            "fields":
+                fields,
+
+            "compliance":
+                compliance,
         }
 
-    # --------------------------------------------------------
-    # Extract fields
-    # --------------------------------------------------------
+        print(
+            "ANALYSIS COMPLETE"
+        )
 
-    fields = extract_fields(
-        extracted_text
-    )
+        return response
 
-    # --------------------------------------------------------
-    # Date detection
-    # --------------------------------------------------------
+    except HTTPException:
 
-    dates_detected = extract_dates(
-        extracted_text
-    )
+        raise
 
-    fields["dates_detected"] = {
+    except Exception as exc:
 
-        "value":
-            dates_detected,
+        print(
+            "UPLOAD ERROR:",
+            repr(exc),
+        )
 
-        "confidence":
-            0.80
-            if dates_detected
-            else 0.0
-
-    }
-
-    # --------------------------------------------------------
-    # Compliance analysis
-    # --------------------------------------------------------
-
-    compliance = run_compliance_check(
-        fields
-    )
-
-    # --------------------------------------------------------
-    # Final response
-    # --------------------------------------------------------
-
-    return {
-
-        "filename":
-            file.filename,
-
-        "content_type":
-            file.content_type,
-
-        "extracted_text":
-            extracted_text,
-
-        "fields":
-            fields,
-
-        "compliance":
-            compliance
-
-    }
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Analysis failed: {str(exc)}"
+            ),
+        )
 
 
 # ============================================================
-# RUN SERVER
+# LOCAL DEVELOPMENT
 # ============================================================
 
 if __name__ == "__main__":
@@ -809,7 +1327,8 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        app,
+        "main:app",
         host="127.0.0.1",
-        port=8000
+        port=8000,
+        reload=True,
     )
