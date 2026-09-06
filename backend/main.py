@@ -892,7 +892,7 @@ def extract_fields(text):
 
 def preprocess_image(image):
     height, width = image.shape[:2]
-    target_width = 1600
+    target_width = 1200
     if width < target_width:
         scale = target_width / width
         new_width = int(width * scale)
@@ -906,24 +906,8 @@ def preprocess_image(image):
         image,
         cv2.COLOR_BGR2GRAY,
     )
-    clahe = cv2.createCLAHE(
-        clipLimit=2.0,
-        tileGridSize=(8, 8),
-    )
-    enhanced = clahe.apply(
-        gray
-    )
-    adaptive = cv2.adaptiveThreshold(
-        enhanced,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31,
-        8,
-    )
     return [
-        enhanced,
-        adaptive,
+        gray,
     ]
 # ============================================================
 # OCR
