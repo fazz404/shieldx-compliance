@@ -698,18 +698,13 @@ def extract_pkd(text):
         re.IGNORECASE,
     )
 
-    for i, line in enumerate(lines):
-
+        for i, line in enumerate(lines):
         if label_pattern.search(line):
-
-                        for next_line in lines[i:i + 4]:
-
+            for next_line in lines[i:i + 4]:
                 match = date_regex.search(
                     next_line
                 )
-
                 if match:
-
                     return {
                         "value": match.group(1),
                         "confidence": 0.80,
