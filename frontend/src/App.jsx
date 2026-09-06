@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./index.css";
+import logo from "./assets/logo.png";
 import jsPDF from "jspdf";
 
 const API_URL = "https://shieldx-api-dngk.onrender.com/upload";
@@ -495,10 +496,8 @@ export default function App() {
 
         <div className="brand">
 
-          <div className="brand-symbol">
-            <span />
-            <span />
-            <span />
+                    <div className="brand-symbol">
+            <img src={logo} alt="ShieldX Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
           </div>
 
           <div>
@@ -1730,11 +1729,9 @@ export default function App() {
 
           <div className="footer-brand">
 
-            <div className="brand-symbol">
+                        <div className="brand-symbol">
 
-              <span />
-              <span />
-              <span />
+              <img src={logo} alt="ShieldX Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
 
             </div>
 
