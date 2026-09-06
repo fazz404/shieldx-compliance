@@ -1,5 +1,6 @@
 import os
 import re
+import time
 
 import cv2
 import numpy as np
@@ -1053,6 +1054,8 @@ async def upload_file(
         # Read image
         # ----------------------------------------------------
 
+        request_start = time.time()
+
         contents = await file.read()
 
         if not contents:
@@ -1089,8 +1092,16 @@ async def upload_file(
         # OCR
         # ----------------------------------------------------
 
+        ocr_start = time.time()
+
         ocr_text = run_ocr(
             image
+        )
+
+        ocr_end = time.time()
+
+        print(
+            f"OCR TOOK: {ocr_end - ocr_start:.2f} seconds"
         )
 
         # ----------------------------------------------------
@@ -1213,6 +1224,10 @@ async def upload_file(
             "compliance":
                 compliance,
         }
+
+        print(
+            f"TOTAL REQUEST TIME: {time.time() - request_start:.2f} seconds"
+        )
 
         print(
             "ANALYSIS COMPLETE"
