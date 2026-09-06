@@ -783,13 +783,21 @@ export default function App() {
                       +
                     </span>
 
-                    <h3>
+                                        <h3>
                       DROP PRODUCT LABEL
                     </h3>
 
                     <p>
                       OR CLICK TO BROWSE
                     </p>
+
+                    <p style={{ fontSize: "0.75rem", opacity: 0.6, marginTop: "8px" }}>
+                      For best results: use a flat, well-lit, straight-on photo with no glare.
+                    </p>
+
+<p style={{ fontSize: "0.75rem", opacity: 0.6, marginTop: "8px" }}>
+  For best results: use a flat, well-lit, straight-on photo with no glare.
+</p>
 
                   </div>
 
