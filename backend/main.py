@@ -591,7 +591,7 @@ def extract_batch(text):
         re.IGNORECASE,
     )
 
-    for i, line in enumerate(lines):
+    for next_line in lines[i + 1:i + 4]:
 
         if not batch_label.search(line):
             continue
@@ -702,7 +702,7 @@ def extract_pkd(text):
 
         if label_pattern.search(line):
 
-            for next_line in lines[i + 1:i + 4]:
+                        for next_line in lines[i:i + 4]:
 
                 match = date_regex.search(
                     next_line
