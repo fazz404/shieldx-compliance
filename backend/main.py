@@ -697,18 +697,27 @@ def extract_pkd(text):
         date_pattern,
         re.IGNORECASE,
     )
-    for i, line in enumerate(lines):
-        if label_pattern.search(line):
-            for next_line in lines[i:i + 4]:
-                match = date_regex.search(
-                    next_line
-                )
-                if match:
-                    return {
-                        "value": match.group(1),
-                        "confidence": 0.80,
-                    }
-
+        for i, line in enumerate(lines):
+        if not batch_label.search(line):
+            continue
+        # Only inspect the immediate next line.
+        # We do NOT search several lines away.
+        if i + 1 >= len(lines):
+            continue
+        next_line = lines[i + 1].strip()
+        # The candidate must be basically just the code.
+        candidate_match = re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9/_\-.]{2,29}",
+            next_line,
+        )
+        if not candidate_match:
+            continue
+        value = candidate_match.group(0)
+        if is_valid_batch_value(value):
+            return {
+                "value": value,
+                "confidence": 0.80,
+            }
     return empty_result()
 
 
