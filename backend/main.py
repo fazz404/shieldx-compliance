@@ -894,7 +894,7 @@ def preprocess_image(image):
 
     height, width = image.shape[:2]
 
-    target_width = 2000
+    target_width = 1400
 
     if width < target_width:
 
@@ -914,18 +914,8 @@ def preprocess_image(image):
         cv2.COLOR_BGR2GRAY,
     )
 
-    clahe = cv2.createCLAHE(
-        clipLimit=1.5,
-        tileGridSize=(8, 8),
-    )
-
-    enhanced = clahe.apply(
-        gray
-    )
-
     return [
         gray,
-        enhanced,
     ]
 
 # ============================================================
@@ -938,9 +928,8 @@ def run_ocr(image):
         image
     )
 
-    psm_modes = [
+     psm_modes = [
         6,
-        11,
     ]
 
     results = []
