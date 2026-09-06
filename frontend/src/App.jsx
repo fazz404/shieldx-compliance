@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import "./index.css";
 
-const API_URL = "http://127.0.0.1:8000/upload";
+const API_URL = "https://shieldx-api-dngk.onrender.com/upload";
 
 const fieldDefinitions = [
   { key: "license_no", label: "LICENSE NUMBER" },
@@ -13,55 +13,79 @@ const fieldDefinitions = [
   { key: "use_by", label: "USE BY / EXPIRY" },
 ];
 
-function statusClass(status = "") {
-  const value = String(status).toUpperCase();
+function statusClass(status) {
+  if (!status) return "";
 
-  if (value === "PASS") return "pass";
-  if (value === "REVIEW" || value === "NEEDS REVIEW") return "review";
-  if (value === "FAIL") return "fail";
+  const normalized = status
+    .toLowerCase()
+    .replace(/\s+/g, "-");
 
-  return "neutral";
+  if (normalized === "pass") return "pass";
+  if (
+    normalized === "review" ||
+    normalized === "needs-review"
+  ) {
+    return "review";
+  }
+  if (normalized === "failed") return "failed";
+  if (normalized === "not-detected") return "not-detected";
+
+  return "";
 }
 
-function PipelineStep({ number, label, active, done }) {
+function PipelineStep({
+  number,
+  label,
+  active,
+  complete,
+}) {
   return (
     <div
-      className={`pipeline-step ${active ? "active" : ""} ${
-        done ? "done" : ""
-      }`}
+      className={`pipeline-step ${
+        active ? "active" : ""
+      } ${complete ? "complete" : ""}`}
     >
-      <div className="pipeline-number">
-        {done ? "✓" : number}
+      <div className="pipeline-step-number">
+        {complete ? "✓" : number}
       </div>
+
       <span>{label}</span>
     </div>
   );
 }
 
-function Metric({ label, value, type }) {
+function Metric({ label, value, detail }) {
   return (
-    <div className={`metric ${type || ""}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className="metric">
+      <div className="metric-value">{value}</div>
+
+      <div className="metric-label">
+        {label}
+      </div>
+
+      {detail && (
+        <div className="metric-detail">
+          {detail}
+        </div>
+      )}
     </div>
   );
 }
 
-function ArchitectureCard({ number, icon, title, description }) {
+function ArchitectureCard({
+  number,
+  title,
+  text,
+}) {
   return (
     <div className="architecture-card">
-      <div className="architecture-top">
-        <span>{number}</span>
-        <small>ONLINE</small>
+      <div className="architecture-number">
+        {number}
       </div>
-
-      <div className="architecture-icon">{icon}</div>
 
       <h3>{title}</h3>
 
-      <p>{description}</p>
-
-      <div className="architecture-line" />
+      <p>{text}</p>
     </div>
   );
 }
@@ -71,7 +95,6 @@ export default function App() {
   const [preview, setPreview] = useState("");
   const [loading, setLoading] = useState(false);
   const [analysisStep, setAnalysisStep] = useState(0);
-
   const [ocrText, setOcrText] = useState("");
   const [fields, setFields] = useState({});
   const [compliance, setCompliance] = useState(null);
@@ -81,32 +104,33 @@ export default function App() {
   const fileInputRef = useRef(null);
   const scanTimer = useRef(null);
 
+  // ==========================================================
+  // LOAD FILE
+  // ==========================================================
+
   const loadFile = (file) => {
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
-      setError("INVALID INPUT — PLEASE SELECT AN IMAGE FILE.");
+      setError("PLEASE SELECT A VALID IMAGE FILE.");
       return;
     }
 
     setError("");
     setImage(file);
 
-    const url = URL.createObjectURL(file);
-    setPreview(url);
+    const objectUrl = URL.createObjectURL(file);
+    setPreview(objectUrl);
 
     setOcrText("");
     setFields({});
     setCompliance(null);
-    setLoading(false);
-    setAnalysisStep(0);
-
-    setTimeout(() => {
-      document
-        .getElementById("inspection")
-        ?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+    setAnalysisStep(1);
   };
+
+  // ==========================================================
+  // FILE CHANGE
+  // ==========================================================
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
@@ -114,9 +138,11 @@ export default function App() {
     if (file) {
       loadFile(file);
     }
-
-    event.target.value = "";
   };
+
+  // ==========================================================
+  // DRAG AND DROP
+  // ==========================================================
 
   const handleDrop = (event) => {
     event.preventDefault();
@@ -129,6 +155,10 @@ export default function App() {
     }
   };
 
+  // ==========================================================
+  // REMOVE IMAGE
+  // ==========================================================
+
   const removeImage = () => {
     if (preview) {
       URL.revokeObjectURL(preview);
@@ -139,45 +169,67 @@ export default function App() {
     setOcrText("");
     setFields({});
     setCompliance(null);
-    setLoading(false);
     setAnalysisStep(0);
     setError("");
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
+
+  // ==========================================================
+  // CLEAN OBJECT URL
+  // ==========================================================
 
   useEffect(() => {
     return () => {
       if (preview) {
         URL.revokeObjectURL(preview);
       }
-
-      if (scanTimer.current) {
-        clearInterval(scanTimer.current);
-      }
     };
   }, [preview]);
+
+  // ==========================================================
+  // ANALYSIS PIPELINE ANIMATION
+  // ==========================================================
 
   useEffect(() => {
     if (!loading) return;
 
-    setAnalysisStep(0);
+    setAnalysisStep(1);
 
-    let step = 0;
+    const timers = [
+      setTimeout(() => {
+        setAnalysisStep(2);
+      }, 800),
 
-    scanTimer.current = setInterval(() => {
-      step += 1;
+      setTimeout(() => {
+        setAnalysisStep(3);
+      }, 1800),
 
-      if (step <= 4) {
-        setAnalysisStep(step);
-      }
-    }, 800);
+      setTimeout(() => {
+        setAnalysisStep(4);
+      }, 2800),
+    ];
 
     return () => {
-      clearInterval(scanTimer.current);
+      timers.forEach((timer) => clearTimeout(timer));
+
+      if (scanTimer.current) {
+        clearTimeout(scanTimer.current);
+      }
     };
   }, [loading]);
 
+  // ==========================================================
+  // ANALYZE PRODUCT
+  // ==========================================================
+
   const analyzeProduct = async () => {
-    if (!image || loading) return;
+    if (!image) {
+      setError("PLEASE UPLOAD A PRODUCT LABEL FIRST.");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -185,83 +237,188 @@ export default function App() {
 
     try {
       const formData = new FormData();
+
       formData.append("file", image);
+
+      console.log("=================================");
+      console.log("SHIELDX ANALYSIS STARTED");
+      console.log("API:", API_URL);
+      console.log("FILE:", image.name);
+      console.log("TYPE:", image.type);
+      console.log("SIZE:", image.size);
+      console.log("=================================");
 
       const response = await fetch(API_URL, {
         method: "POST",
         body: formData,
       });
 
+      console.log(
+        "SHIELDX SERVER STATUS:",
+        response.status
+      );
+
+      const contentType =
+        response.headers.get("content-type") || "";
+
+      // ======================================================
+      // SERVER ERROR
+      // ======================================================
+
       if (!response.ok) {
+        let message = `SERVER ERROR ${response.status}`;
+
+        if (
+          contentType.includes("application/json")
+        ) {
+          const errorData = await response.json();
+
+          message =
+            errorData.detail ||
+            errorData.message ||
+            message;
+        } else {
+          const text = await response.text();
+
+          if (text) {
+            message += ` — ${text.slice(0, 300)}`;
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      // ======================================================
+      // INVALID RESPONSE
+      // ======================================================
+
+      if (
+        !contentType.includes("application/json")
+      ) {
         throw new Error(
-          `SERVER ERROR ${response.status} — ANALYSIS FAILED.`
+          "ANALYSIS ENGINE RETURNED AN INVALID RESPONSE."
         );
       }
 
+      // ======================================================
+      // READ RESPONSE
+      // ======================================================
+
       const data = await response.json();
+
+      console.log(
+        "SHIELDX API RESPONSE:",
+        data
+      );
+
+      // ======================================================
+      // SAVE RESPONSE
+      // ======================================================
+
+      setOcrText(
+        data.extracted_text || ""
+      );
+
+      setFields(
+        data.fields || {}
+      );
+
+      setCompliance(
+        data.compliance?.summary || null
+      );
 
       setAnalysisStep(4);
 
-      setOcrText(data.extracted_text || "");
-      setFields(data.fields || {});
-      setCompliance(data.compliance?.summary || null);
+      // ======================================================
+      // SCROLL TO REPORT
+      // ======================================================
 
       setTimeout(() => {
         document
           .getElementById("results")
-          ?.scrollIntoView({ behavior: "smooth" });
+          ?.scrollIntoView({
+            behavior: "smooth",
+          });
       }, 500);
-    } catch (err) {
-      console.error(err);
 
-      setError(
-        err?.message ||
-          "UNABLE TO CONNECT TO THE SHIELDX ANALYSIS ENGINE."
+    } catch (err) {
+      console.error(
+        "SHIELDX ANALYSIS ERROR:",
+        err
       );
+
+      let message =
+        err?.message ||
+        "ANALYSIS FAILED. PLEASE TRY AGAIN.";
+
+      // Friendly browser connection message
+      if (
+        err?.name === "TypeError" &&
+        message.toLowerCase().includes("fetch")
+      ) {
+        message =
+          "UNABLE TO CONNECT TO SHIELDX BACKEND. MAKE SURE THE FASTAPI SERVER IS RUNNING ON PORT 8000.";
+      }
+
+      setError(message);
+      setAnalysisStep(0);
+
     } finally {
       setLoading(false);
     }
   };
 
-  const summary = compliance || {};
+  // ==========================================================
+  // COMPLIANCE DATA
+  // ==========================================================
 
   const coverage =
-    Number(summary.verification_coverage ?? 0) || 0;
+    compliance?.verification_coverage ?? 0;
 
-  const totalChecks = Number(summary.total_checks ?? 0);
-  const passed = Number(summary.passed ?? 0);
-  const review = Number(summary.needs_review ?? 0);
-  const failed = Number(summary.failed ?? 0);
-  const notDetected = Number(summary.not_detected ?? 0);
+  const totalChecks =
+    compliance?.total_checks ?? 7;
+
+  const passed =
+    compliance?.passed ?? 0;
+
+  const review =
+    compliance?.needs_review ?? 0;
+
+  const failed =
+    compliance?.failed ?? 0;
+
+  const notDetected =
+    compliance?.not_detected ?? 0;
 
   const overallStatus =
-    summary.status ||
-    (failed > 0
-      ? "FAIL"
-      : review > 0
-      ? "NEEDS REVIEW"
-      : passed > 0
-      ? "PASS"
-      : "NOT DETECTED");
+    compliance?.status ||
+    "AWAITING ANALYSIS";
 
-  const overallClass = statusClass(overallStatus);
+  const overallClass =
+    statusClass(overallStatus);
 
-  const checks = Array.isArray(summary.checks)
-    ? summary.checks
-    : [];
+  const checks =
+    compliance?.checks || [];
 
-  const circumference = 2 * Math.PI * 56;
+  const circumference =
+    2 * Math.PI * 76;
+
   const progressOffset =
-    circumference - (Math.min(coverage, 100) / 100) * circumference;
+    circumference -
+    (coverage / 100) *
+      circumference;
 
   return (
-    <div className="shieldx">
-      {/* ============================================================
-          NAVIGATION
-      ============================================================ */}
+    <main className="shieldx">
+
+      {/* ======================================================
+          TOP NAVIGATION
+      ====================================================== */}
 
       <header className="topbar">
-        <a href="#home" className="brand">
+
+        <div className="brand">
+
           <div className="brand-symbol">
             <span />
             <span />
@@ -269,902 +426,1269 @@ export default function App() {
           </div>
 
           <div>
-            <strong>
+            <div className="brand-name">
               SHIELD<span>X</span>
-            </strong>
+            </div>
 
-            <small>COMPLIANCE INTELLIGENCE</small>
+            <div className="brand-subtitle">
+              COMPLIANCE INTELLIGENCE
+            </div>
           </div>
-        </a>
+
+        </div>
 
         <nav className="navigation">
-          <a href="#home">SYSTEM</a>
-          <a href="#inspection">INSPECT</a>
-          <a href="#results">REPORT</a>
-          <a href="#architecture">ARCHITECTURE</a>
+
+          <a href="#home">
+            HOME
+          </a>
+
+          <a href="#scanner">
+            SCANNER
+          </a>
+
+          <a href="#how-it-works">
+            HOW IT WORKS
+          </a>
+
         </nav>
 
         <div className="system-indicator">
-          <span className="pulse-dot" />
-          <span>SYSTEM OPERATIONAL</span>
+
+          <span className="system-dot" />
+
+          SYSTEM ONLINE
+
         </div>
+
       </header>
 
-      {/* ============================================================
+
+      {/* ======================================================
           HERO
-      ============================================================ */}
+      ====================================================== */}
 
-      <main>
-        <section id="home" className="hero-section">
-          <div className="hero-grid">
-            <div className="hero-left">
-              <div className="system-tag">
-                <span>SYS.01</span>
-                AI-ASSISTED LABEL INSPECTION
-              </div>
+      <section
+        id="home"
+        className="hero-section"
+      >
 
-              <h1>
-                SEE WHAT
-                <br />
-                THE LABEL
-                <br />
-                <em>HIDES.</em>
-              </h1>
+        <div className="hero-grid">
 
-              <p className="hero-description">
-                ShieldX transforms a packaged-product label into a
-                structured compliance report using OCR, intelligent
-                field extraction and rule-based verification.
-              </p>
+          <div className="hero-left">
 
-              <div className="hero-buttons">
-                <button
-                  className="primary-button"
-                  onClick={() =>
-                    document
-                      .getElementById("inspection")
-                      ?.scrollIntoView({ behavior: "smooth" })
-                  }
-                >
-                  START INSPECTION
-                  <b>↗</b>
-                </button>
+            <div className="system-tag">
 
-                <a href="#architecture" className="outline-button">
-                  HOW IT WORKS
-                </a>
-              </div>
+              <span />
 
-              <div className="hero-stats">
-                <div>
-                  <strong>OCR</strong>
-                  <span>TEXT EXTRACTION</span>
-                </div>
+              AI-POWERED LABEL INSPECTION
 
-                <div>
-                  <strong>AI</strong>
-                  <span>FIELD DETECTION</span>
-                </div>
-
-                <div>
-                  <strong>RULES</strong>
-                  <span>COMPLIANCE ENGINE</span>
-                </div>
-              </div>
             </div>
 
-            <div className="hero-right">
-              <div className="scanner-console">
-                <div className="console-top">
-                  <span>SHIELDX / VISUAL INSPECTION CORE</span>
-                  <span className="console-live">
-                    ● LIVE SCAN
+            <h1>
+
+              SEE WHAT
+              <br />
+
+              THE LABEL
+              <br />
+
+              <span>HIDES.</span>
+
+            </h1>
+
+            <p className="hero-description">
+
+              ShieldX transforms product labels
+              into structured compliance
+              intelligence using OCR-powered
+              inspection and automated
+              verification.
+
+            </p>
+
+            <div className="hero-buttons">
+
+              <a
+                href="#scanner"
+                className="primary-button"
+              >
+
+                START INSPECTION
+
+                <span>→</span>
+
+              </a>
+
+              <a
+                href="#how-it-works"
+                className="secondary-button"
+              >
+
+                HOW IT WORKS
+
+              </a>
+
+            </div>
+
+            <div className="hero-stats">
+
+              <div>
+                <strong>07</strong>
+                <span>CHECKPOINTS</span>
+              </div>
+
+              <div>
+                <strong>OCR</strong>
+                <span>EXTRACTION</span>
+              </div>
+
+              <div>
+                <strong>AI</strong>
+                <span>VERIFICATION</span>
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <div className="hero-right">
+
+            <div className="scanner-console">
+
+              <div className="console-top">
+
+                <span>
+                  LIVE SCANNER
+                </span>
+
+                <span className="console-live">
+                  ● ACTIVE
+                </span>
+
+              </div>
+
+              <div className="console-body">
+
+                <div className="scan-grid" />
+
+                <div className="radar-circle">
+                  <div className="radar-sweep" />
+                </div>
+
+                <div className="package-mockup">
+
+                  <div className="package-label">
+
+                    <small>
+                      PRODUCT LABEL
+                    </small>
+
+                    <strong>
+                      SCAN TARGET
+                    </strong>
+
+                    <div className="fake-line" />
+                    <div className="fake-line short" />
+                    <div className="fake-line" />
+
+                    <div className="fake-license">
+                      LIC. NO. XXXXXXXX
+                    </div>
+
+                    <div className="fake-mrp">
+                      MRP ₹XX
+                    </div>
+
+                  </div>
+
+                </div>
+
+                <div className="scanner-line" />
+
+                <div className="crosshair">
+
+                  <span />
+                  <span />
+                  <span />
+                  <span />
+
+                </div>
+
+                <div className="detection-box box-one">
+                  <span>
+                    LICENSE
                   </span>
                 </div>
 
-                <div className="console-body">
-                  <div className="scan-grid" />
-
-                  <div className="radar-circle">
-                    <div />
-                  </div>
-
-                  <div className="package-mockup">
-                    <div className="package-header">
-                      PRODUCT LABEL
-                      <br />
-                      SAMPLE / PACKAGED GOODS
-                    </div>
-
-                    <div className="package-brand">PACK</div>
-
-                    <div className="package-line" />
-
-                    <div className="package-info">
-                      <div>
-                        <small>MRP</small>
-                        <strong>₹120</strong>
-                      </div>
-
-                      <div>
-                        <small>NET</small>
-                        <strong>500G</strong>
-                      </div>
-
-                      <div>
-                        <small>LIC.</small>
-                        <strong>FSSAI</strong>
-                      </div>
-                    </div>
-
-                    <div className="package-footer">
-                      LABEL / DATA / VERIFY
-                    </div>
-                  </div>
-
-                  <div className="scanner-line" />
-
-                  <div className="crosshair">+</div>
-
-                  <div className="detection-box box-one">
-                    <span>LICENSE NUMBER</span>
-                    <b>DETECTED 98%</b>
-                  </div>
-
-                  <div className="detection-box box-two">
-                    <span>MRP</span>
-                    <b>DETECTED 96%</b>
-                  </div>
-
-                  <div className="detection-box box-three">
-                    <span>EXPIRY DATE</span>
-                    <b>REVIEW 72%</b>
-                  </div>
+                <div className="detection-box box-two">
+                  <span>
+                    MRP
+                  </span>
                 </div>
 
-                <div className="console-bottom">
-                  <div>
-                    <span>OCR ENGINE</span>
-                    <b>READY</b>
-                  </div>
-
-                  <div>
-                    <span>FIELD EXTRACTION</span>
-                    <b>READY</b>
-                  </div>
-
-                  <div>
-                    <span>RULE ENGINE</span>
-                    <b>READY</b>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="hero-footer">
-            <span>SHIELDX / COMPLIANCE INTELLIGENCE</span>
-            <span>PRELIMINARY AI-ASSISTED INSPECTION</span>
-          </div>
-        </section>
-
-        {/* ============================================================
-            INSPECTION
-        ============================================================ */}
-
-        <section id="inspection" className="inspection-section">
-          <div className="section-container">
-            <div className="section-header">
-              <div className="section-index">01</div>
-
-              <div>
-                <div className="section-kicker">
-                  INPUT / VISUAL ANALYSIS
+                <div className="detection-box box-three">
+                  <span>
+                    NET QTY
+                  </span>
                 </div>
 
-                <h2>
-                  INSPECT
-                  <br />
-                  <span>THE LABEL.</span>
-                </h2>
               </div>
 
-              <p>
-                Upload a product-label image. ShieldX extracts
-                visible information and evaluates the detected
-                fields against configured compliance rules.
-              </p>
-            </div>
-
-            <div className="inspection-console">
-              <div className="console-heading">
-                <div>
-                  <span>INPUT CHANNEL</span>
-                  <strong>IMAGE / LABEL</strong>
-                </div>
+              <div className="console-bottom">
 
                 <span>
-                  {image ? "IMAGE LOADED" : "WAITING FOR INPUT"}
+                  OPTICAL DETECTION
                 </span>
+
+                <span>
+                  97.4%
+                </span>
+
               </div>
 
-              {!image ? (
-                <div
-                  className={`upload-interface ${
-                    dragging ? "dragging" : ""
-                  }`}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    setDragging(true);
-                  }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    hidden
-                  />
+            </div>
 
-                  <div className="upload-target">
-                    <div className="target-corner top-left" />
-                    <div className="target-corner top-right" />
-                    <div className="target-corner bottom-left" />
-                    <div className="target-corner bottom-right" />
+          </div>
 
-                    <div className="upload-cross">+</div>
+        </div>
 
-                    <strong>
-                      DROP PRODUCT LABEL HERE
-                    </strong>
+        <div className="hero-footer">
 
-                    <span>
-                      OR CLICK TO SELECT IMAGE
+          <span>
+            SHIELDX / 01
+          </span>
+
+          <span>
+            INSPECT • EXTRACT • VERIFY
+          </span>
+
+          <span>
+            SCROLL TO INSPECT ↓
+          </span>
+
+        </div>
+
+      </section>
+
+
+      {/* ======================================================
+          INSPECTION
+      ====================================================== */}
+
+      <section
+        id="scanner"
+        className="inspection-section"
+      >
+
+        <div className="section-container">
+
+          <div className="section-header">
+
+            <div>
+
+              <div className="section-index">
+                01 / SCANNER
+              </div>
+
+              <div className="section-kicker">
+                PRODUCT LABEL INSPECTION
+              </div>
+
+            </div>
+
+            <p>
+
+              Upload a product label and let
+              ShieldX extract, structure and
+              evaluate its compliance information.
+
+            </p>
+
+          </div>
+
+
+          <div className="inspection-console">
+
+            <div className="console-heading">
+
+              <div>
+
+                <span className="console-heading-label">
+                  INSPECTION CONSOLE
+                </span>
+
+                <h2>
+
+                  {image
+                    ? "LABEL LOADED"
+                    : "UPLOAD LABEL"}
+
+                </h2>
+
+              </div>
+
+              <div className="console-id">
+                SX / OCR-01
+              </div>
+
+            </div>
+
+
+            {!image ? (
+
+              <div
+                className={`upload-interface ${
+                  dragging ? "dragging" : ""
+                }`}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragging(true);
+                }}
+                onDragLeave={() =>
+                  setDragging(false)
+                }
+                onDrop={handleDrop}
+                onClick={() =>
+                  fileInputRef.current?.click()
+                }
+              >
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  hidden
+                />
+
+                <div className="upload-target">
+
+                  <div className="target-corner top-left" />
+                  <div className="target-corner top-right" />
+                  <div className="target-corner bottom-left" />
+                  <div className="target-corner bottom-right" />
+
+                  <div className="upload-cross">
+
+                    <span />
+                    <span />
+
+                  </div>
+
+                  <div className="upload-content">
+
+                    <span className="upload-icon">
+                      +
                     </span>
-                  </div>
-
-                  <div className="upload-footer">
-                    <span>SUPPORTED / JPG / PNG / WEBP</span>
-                    <span>LOCAL PROCESSING CHANNEL</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="loaded-interface">
-                  <div className="image-stage">
-                    <div className="image-stage-header">
-                      <span>VISUAL INPUT</span>
-                      <span>FRAME LOCKED</span>
-                    </div>
-
-                    <div className="image-wrapper">
-                      <img
-                        src={preview}
-                        alt="Uploaded product label"
-                      />
-
-                      <div className="image-corner ic-tl" />
-                      <div className="image-corner ic-tr" />
-                      <div className="image-corner ic-bl" />
-                      <div className="image-corner ic-br" />
-
-                      {loading && (
-                        <div className="image-scan-line" />
-                      )}
-                    </div>
-
-                    <div className="image-stage-footer">
-                      {image.name}
-                    </div>
-                  </div>
-
-                  <div className="pipeline-panel">
-                    <div className="pipeline-status">
-                      <span className="pulse-dot" />
-
-                      {loading
-                        ? "ANALYSIS ENGINE ACTIVE"
-                        : compliance
-                        ? "ANALYSIS COMPLETE"
-                        : "READY FOR ANALYSIS"}
-                    </div>
 
                     <h3>
-                      {loading
-                        ? "SCANNING<br />LABEL DATA."
-                        : compliance
-                        ? "INSPECTION<br />COMPLETE."
-                        : "READY TO<br />INSPECT."}
+                      DROP PRODUCT LABEL
                     </h3>
 
                     <p>
-                      {loading
-                        ? "ShieldX is extracting text, identifying compliance fields and evaluating detected information."
-                        : compliance
-                        ? "The uploaded label has been processed. Review the generated compliance report below."
-                        : "Start the analysis pipeline to extract and validate the visible label information."}
+                      OR CLICK TO BROWSE
                     </p>
 
-                    <div className="pipeline">
-                      <PipelineStep
-                        number="01"
-                        label="IMAGE ACQUISITION"
-                        done={analysisStep >= 1}
-                        active={
-                          loading && analysisStep === 1
-                        }
-                      />
-
-                      <PipelineStep
-                        number="02"
-                        label="OCR TEXT EXTRACTION"
-                        done={analysisStep >= 2}
-                        active={
-                          loading && analysisStep === 2
-                        }
-                      />
-
-                      <PipelineStep
-                        number="03"
-                        label="FIELD IDENTIFICATION"
-                        done={analysisStep >= 3}
-                        active={
-                          loading && analysisStep === 3
-                        }
-                      />
-
-                      <PipelineStep
-                        number="04"
-                        label="COMPLIANCE VERIFICATION"
-                        done={analysisStep >= 4}
-                        active={
-                          loading && analysisStep === 4
-                        }
-                      />
-                    </div>
-
-                    <div className="inspection-actions">
-                      <button
-                        className="primary-button"
-                        onClick={analyzeProduct}
-                        disabled={loading}
-                      >
-                        {loading
-                          ? "ANALYZING..."
-                          : compliance
-                          ? "RUN AGAIN"
-                          : "ANALYZE LABEL"}
-                        <b>↗</b>
-                      </button>
-
-                      <button
-                        className="secondary-button"
-                        onClick={removeImage}
-                        disabled={loading}
-                      >
-                        RESET
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {error && (
-              <div className="error-box">
-                <strong>!</strong>
-                <span>{error}</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* ============================================================
-            RESULTS
-        ============================================================ */}
-
-        {compliance && (
-          <section id="results" className="results-section">
-            <div className="section-container">
-              <div className="report-heading">
-                <div>
-                  <div className="section-kicker">
-                    ANALYSIS / COMPLIANCE REPORT
                   </div>
 
-                  <h2>
-                    INSPECTION
-                    <br />
-                    <span>REPORT.</span>
-                  </h2>
                 </div>
 
-                <div className="report-number">
-                  <span>REPORT STATUS</span>
-                  <strong>GENERATED</strong>
+                <div className="upload-footer">
+
+                  <span>
+                    SUPPORTED: JPG / PNG / WEBP
+                  </span>
+
+                  <span>
+                    MAX 10MB
+                  </span>
+
                 </div>
+
               </div>
 
-              <div className={`verdict-panel ${overallClass}`}>
-                <div className="verdict-icon">
-                  {overallClass === "pass"
-                    ? "✓"
-                    : overallClass === "fail"
-                    ? "×"
-                    : "!"}
-                </div>
+            ) : (
 
-                <div className="verdict-main">
-                  <span>PRELIMINARY SYSTEM VERDICT</span>
+              <div className="loaded-interface">
 
-                  <h3>{overallStatus}</h3>
-                </div>
+                <div className="image-stage">
 
-                <div className="verdict-meta">
-                  <span>FIELDS EVALUATED</span>
-                  <strong>
-                    {summary.evaluated_fields ?? totalChecks}
-                  </strong>
-                </div>
-              </div>
+                  <div className="image-stage-header">
 
-              <div className="metrics-layout">
-                <div className="coverage-panel">
-                  <div className="coverage-ring">
-                    <svg viewBox="0 0 120 120">
-                      <circle
-                        className="ring-background"
-                        cx="60"
-                        cy="60"
-                        r="56"
-                      />
+                    <span>
+                      INPUT IMAGE
+                    </span>
 
-                      <circle
-                        className="ring-progress"
-                        cx="60"
-                        cy="60"
-                        r="56"
-                        strokeDasharray={circumference}
-                        strokeDashoffset={progressOffset}
-                      />
-                    </svg>
+                    <button
+                      type="button"
+                      onClick={removeImage}
+                    >
+                      REMOVE ×
+                    </button>
 
-                    <div>
-                      <strong>
-                        {Math.round(coverage)}%
-                      </strong>
-
-                      <span>COVERAGE</span>
-                    </div>
                   </div>
 
-                  <div className="coverage-label">
-                    VERIFICATION COVERAGE
-                    <br />
-                    DETECTED REQUIRED FIELDS
-                  </div>
-                </div>
+                  <div className="image-wrapper">
 
-                <div className="metric-grid">
-                  <Metric
-                    label="PASSED"
-                    value={passed}
-                    type="pass"
-                  />
+                    <img
+                      src={preview}
+                      alt="Uploaded product label"
+                    />
 
-                  <Metric
-                    label="NEEDS REVIEW"
-                    value={review}
-                    type="review"
-                  />
+                    <div className="image-corner top-left" />
+                    <div className="image-corner top-right" />
+                    <div className="image-corner bottom-left" />
+                    <div className="image-corner bottom-right" />
 
-                  <Metric
-                    label="FAILED"
-                    value={failed}
-                    type="fail"
-                  />
+                    {loading && (
+                      <div className="image-scan-line" />
+                    )}
 
-                  <Metric
-                    label="NOT DETECTED"
-                    value={notDetected}
-                  />
-                </div>
-              </div>
-
-              <div className="report-notice">
-                <div>!</div>
-
-                <p>
-                  Verification coverage indicates how many
-                  required fields were detected from the
-                  uploaded image. A detected field is not
-                  automatically proof of legal compliance.
-                  Final regulatory determination requires human
-                  verification.
-                </p>
-              </div>
-
-              {/* ======================================================
-                  EXTRACTED INFORMATION
-              ====================================================== */}
-
-              <div className="report-block">
-                <div className="block-heading">
-                  <div>
-                    <span>02</span>
-                    <strong>EXTRACTED INFORMATION</strong>
                   </div>
 
-                  <small>
-                    OCR / STRUCTURED FIELD EXTRACTION
-                  </small>
-                </div>
+                  <div className="image-stage-footer">
 
-                <div className="field-table">
-                  {fieldDefinitions.map((definition, index) => {
-                    const field = fields?.[definition.key];
+                    <span>
+                      {image.name}
+                    </span>
 
-                    const value =
-                      typeof field === "object" &&
-                      field !== null
-                        ? field.value ??
-                          field.text ??
-                          field.detected_value ??
-                          "NOT DETECTED"
-                        : field ?? "NOT DETECTED";
+                    <span>
 
-                    const fieldStatus =
-                      typeof field === "object" &&
-                      field !== null
-                        ? field.status || ""
-                        : "";
+                      {(
+                        image.size /
+                        1024 /
+                        1024
+                      ).toFixed(2)}{" "}
+                      MB
 
-                    const confidenceRaw =
-                      typeof field === "object" &&
-                      field !== null
-                        ? field.confidence ??
-                          field.score ??
-                          0
-                        : 0;
+                    </span>
 
-                    let confidence =
-                      Number(confidenceRaw) || 0;
-
-                    if (confidence <= 1) {
-                      confidence *= 100;
-                    }
-
-                    confidence = Math.max(
-                      0,
-                      Math.min(100, confidence)
-                    );
-
-                    const detected =
-                      value !== null &&
-                      value !== undefined &&
-                      String(value).trim() !== "" &&
-                      String(value).toUpperCase() !==
-                        "NOT DETECTED";
-
-                    return (
-                      <div
-                        className="field-row"
-                        key={definition.key}
-                      >
-                        <div className="field-number">
-                          {String(index + 1).padStart(2, "0")}
-                        </div>
-
-                        <div className="field-label">
-                          {definition.label}
-                        </div>
-
-                        <div
-                          className="field-value"
-                          title={String(value)}
-                        >
-                          {String(value)}
-                        </div>
-
-                        <div className="field-confidence">
-                          <span>
-                            CONFIDENCE{" "}
-                            {Math.round(confidence)}%
-                          </span>
-
-                          <div>
-                            <i
-                              style={{
-                                width: `${confidence}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-
-                        <div
-                          className={`status-pill ${
-                            statusClass(fieldStatus) ||
-                            (detected ? "neutral" : "review")
-                          }`}
-                        >
-                          <i />
-                          {fieldStatus ||
-                            (detected
-                              ? "DETECTED"
-                              : "NOT DETECTED")}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* ======================================================
-                  COMPLIANCE CHECKS
-              ====================================================== */}
-
-              <div className="report-block">
-                <div className="block-heading">
-                  <div>
-                    <span>03</span>
-                    <strong>COMPLIANCE CHECKS</strong>
                   </div>
 
-                  <small>
-                    RULE-BASED VALIDATION ENGINE
-                  </small>
                 </div>
 
-                <div className="checks-list">
-                  {checks.length > 0 ? (
-                    checks.map((check, index) => {
-                      const status =
-                        check.status ||
-                        check.result ||
-                        "REVIEW";
 
-                      const fieldName =
-                        check.field ||
-                        check.name ||
-                        check.label ||
-                        "UNKNOWN FIELD";
+                <div className="pipeline-panel">
 
-                      const reason =
-                        check.reason ||
-                        check.message ||
-                        check.details ||
-                        "No additional explanation provided.";
+                  <div className="pipeline-status">
 
-                      return (
-                        <div
-                          className="compliance-row"
-                          key={`${fieldName}-${index}`}
-                        >
-                          <div className="compliance-number">
-                            {String(index + 1).padStart(2, "0")}
-                          </div>
+                    <span
+                      className={
+                        loading
+                          ? "status-active"
+                          : "status-ready"
+                      }
+                    />
 
-                          <div className="compliance-field">
-                            <strong>{fieldName}</strong>
-                          </div>
+                    {loading
+                      ? "ANALYSIS IN PROGRESS"
+                      : "READY FOR ANALYSIS"}
 
-                          <div className="compliance-reason">
-                            <p>{reason}</p>
-                            <span>
-                              RULE ENGINE / AUTOMATED CHECK
-                            </span>
-                          </div>
-
-                          <div
-                            className={`status-pill ${statusClass(
-                              status
-                            )}`}
-                          >
-                            <i />
-                            {status}
-                          </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="compliance-row">
-                      <div className="compliance-number">
-                        01
-                      </div>
-
-                      <div className="compliance-field">
-                        <strong>NO CHECK DATA</strong>
-                      </div>
-
-                      <div className="compliance-reason">
-                        <p>
-                          The compliance engine did not return
-                          individual check records.
-                        </p>
-                      </div>
-
-                      <div className="status-pill neutral">
-                        <i />
-                        REVIEW
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* ======================================================
-                  OCR
-              ====================================================== */}
-
-              <div className="ocr-block">
-                <div className="block-heading">
-                  <div>
-                    <span>04</span>
-                    <strong>RAW OCR OUTPUT</strong>
                   </div>
-
-                  <small>
-                    EXTRACTED TEXT / SOURCE DATA
-                  </small>
-                </div>
-
-                <pre>
-                  {ocrText || "NO OCR TEXT RETURNED."}
-                </pre>
-              </div>
-
-              {/* ======================================================
-                  HUMAN REVIEW
-              ====================================================== */}
-
-              <div className="human-review-panel">
-                <div className="review-symbol">!</div>
-
-                <div>
-                  <span>HUMAN VERIFICATION REQUIRED</span>
 
                   <h3>
-                    AI assists inspection. It does not replace
-                    regulatory judgment.
+
+                    INSPECTION
+                    <br />
+                    PIPELINE
+
                   </h3>
 
                   <p>
-                    ShieldX provides a preliminary,
-                    AI-assisted assessment based on the visible
-                    contents of the uploaded label. Regulatory
-                    compliance should be confirmed by a qualified
-                    human reviewer using the applicable
-                    legislation and current standards.
+
+                    Multi-stage OCR extraction
+                    and compliance verification.
+
                   </p>
+
+
+                  <div className="pipeline">
+
+                    <PipelineStep
+                      number="01"
+                      label="IMAGE"
+                      active={
+                        analysisStep === 1
+                      }
+                      complete={
+                        analysisStep > 1
+                      }
+                    />
+
+                    <PipelineStep
+                      number="02"
+                      label="OCR"
+                      active={
+                        analysisStep === 2
+                      }
+                      complete={
+                        analysisStep > 2
+                      }
+                    />
+
+                    <PipelineStep
+                      number="03"
+                      label="EXTRACT"
+                      active={
+                        analysisStep === 3
+                      }
+                      complete={
+                        analysisStep > 3
+                      }
+                    />
+
+                    <PipelineStep
+                      number="04"
+                      label="VERIFY"
+                      active={
+                        analysisStep === 4
+                      }
+                      complete={
+                        analysisStep > 4
+                      }
+                    />
+
+                  </div>
+
+
+                  <div className="inspection-actions">
+
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={analyzeProduct}
+                      disabled={loading}
+                    >
+
+                      {loading
+                        ? "ANALYZING..."
+                        : "ANALYZE PRODUCT"}
+
+                      <span>→</span>
+
+                    </button>
+
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() =>
+                        fileInputRef.current?.click()
+                      }
+                    >
+
+                      CHANGE IMAGE
+
+                    </button>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      hidden
+                    />
+
+                  </div>
+
                 </div>
-              </div>
-            </div>
-          </section>
-        )}
 
-        {/* ============================================================
-            ARCHITECTURE
-        ============================================================ */}
-
-        <section
-          id="architecture"
-          className="system-section"
-        >
-          <div className="section-container">
-            <div className="system-heading">
-              <div className="section-index">05</div>
-
-              <div>
-                <div className="section-kicker">
-                  SYSTEM / ARCHITECTURE
-                </div>
-
-                <h2>
-                  BUILT TO
-                  <br />
-                  <span>VERIFY.</span>
-                </h2>
-              </div>
-            </div>
-
-            <div className="architecture">
-              <ArchitectureCard
-                number="01"
-                icon="◉"
-                title="IMAGE INPUT"
-                description="Secure visual intake for packaged-product labels and regulatory information."
-              />
-
-              <ArchitectureCard
-                number="02"
-                icon="⌁"
-                title="OCR ENGINE"
-                description="Converts visible label content into machine-readable text for downstream analysis."
-              />
-
-              <ArchitectureCard
-                number="03"
-                icon="◇"
-                title="FIELD AI"
-                description="Identifies important product attributes such as license, MRP, dates and quantity."
-              />
-
-              <ArchitectureCard
-                number="04"
-                icon="✓"
-                title="RULE ENGINE"
-                description="Evaluates detected fields against configured compliance requirements."
-              />
-            </div>
-
-            <div className="capability-strip">
-              <div>
-                <strong>IMAGE → DATA</strong>
-                <span>VISUAL EXTRACTION</span>
               </div>
 
-              <div>
-                <strong>DATA → FIELDS</strong>
-                <span>STRUCTURED OUTPUT</span>
+            )}
+
+
+            {error && (
+
+              <div className="error-box">
+
+                <strong>
+                  ANALYSIS ERROR
+                </strong>
+
+                <span>
+                  {error}
+                </span>
+
               </div>
 
-              <div>
-                <strong>FIELDS → RULES</strong>
-                <span>COMPLIANCE VALIDATION</span>
-              </div>
+            )}
 
-              <div>
-                <strong>RULES → REPORT</strong>
-                <span>HUMAN-READY RESULT</span>
-              </div>
-            </div>
           </div>
-        </section>
-      </main>
 
-      {/* ============================================================
-          FOOTER
-      ============================================================ */}
+        </div>
 
-      <footer className="footer">
-        <div className="footer-container">
-          <div className="footer-brand">
-            <div className="brand-symbol">
-              <span />
-              <span />
-              <span />
+      </section>
+
+
+      {/* ======================================================
+          RESULTS
+      ====================================================== */}
+
+      <section
+        id="results"
+        className="results-section"
+      >
+
+        <div className="section-container">
+
+          <div className="report-heading">
+
+            <div>
+
+              <div className="section-index">
+                02 / REPORT
+              </div>
+
+              <div className="section-kicker">
+                COMPLIANCE ANALYSIS
+              </div>
+
+              <h2>
+
+                INSPECTION
+                <br />
+                RESULTS
+
+              </h2>
+
+            </div>
+
+            <div className="report-number">
+
+              SX
+
+              <span>
+                REPORT
+              </span>
+
+            </div>
+
+          </div>
+
+
+          {/* VERDICT */}
+
+          <div className="verdict-panel">
+
+            <div
+              className={`verdict-icon ${overallClass}`}
+            >
+
+              {overallStatus === "PASS"
+                ? "✓"
+                : overallStatus === "FAILED"
+                ? "!"
+                : "?"}
+
+            </div>
+
+            <div className="verdict-main">
+
+              <span>
+                OVERALL VERDICT
+              </span>
+
+              <h3>
+                {overallStatus}
+              </h3>
+
+            </div>
+
+            <div className="verdict-meta">
+
+              <span>
+
+                {compliance
+                  ? "PRELIMINARY AI-ASSISTED INSPECTION"
+                  : "AWAITING ANALYSIS"}
+
+              </span>
+
+              <strong>
+
+                {compliance
+                  ? `${compliance.evaluated_fields || 0}/${totalChecks} FIELDS VERIFIED`
+                  : "NO REPORT GENERATED"}
+
+              </strong>
+
+            </div>
+
+          </div>
+
+
+          {/* METRICS */}
+
+          <div className="metrics-layout">
+
+            <div className="coverage-panel">
+
+              <div className="block-heading">
+
+                <span>
+                  01
+                </span>
+
+                VERIFICATION COVERAGE
+
+              </div>
+
+              <div className="coverage-ring">
+
+                <svg
+                  viewBox="0 0 180 180"
+                  aria-label={`Verification coverage ${coverage}%`}
+                >
+
+                  <circle
+                    className="ring-background"
+                    cx="90"
+                    cy="90"
+                    r="76"
+                  />
+
+                  <circle
+                    className="ring-progress"
+                    cx="90"
+                    cy="90"
+                    r="76"
+                    strokeDasharray={circumference}
+                    strokeDashoffset={progressOffset}
+                  />
+
+                </svg>
+
+                <div className="coverage-label">
+
+                  <strong>
+                    {coverage}%
+                  </strong>
+
+                  <span>
+                    COVERAGE
+                  </span>
+
+                </div>
+
+              </div>
+
+            </div>
+
+
+            <div className="metric-grid">
+
+              <Metric
+                label="PASSED"
+                value={passed}
+                detail="VERIFIED"
+              />
+
+              <Metric
+                label="NEEDS REVIEW"
+                value={review}
+                detail="HUMAN CHECK"
+              />
+
+              <Metric
+                label="FAILED"
+                value={failed}
+                detail="RULE VIOLATION"
+              />
+
+              <Metric
+                label="NOT DETECTED"
+                value={notDetected}
+                detail="NO RELIABLE DATA"
+              />
+
+            </div>
+
+          </div>
+
+
+          {/* NOTICE */}
+
+          <div className="report-notice">
+
+            Verification coverage indicates how
+            many required fields were detected from
+            the uploaded image. A detected field is
+            not automatically proof of legal
+            compliance. Final regulatory determination
+            requires human verification.
+
+          </div>
+
+
+          {/* ====================================================
+              EXTRACTED INFORMATION
+          ==================================================== */}
+
+          <div className="report-block">
+
+            <div className="block-heading">
+
+              <span>
+                02
+              </span>
+
+              EXTRACTED INFORMATION
+
+            </div>
+
+            <h2>
+              PRODUCT INFORMATION
+            </h2>
+
+            <div className="field-table">
+
+              {fieldDefinitions.map(
+                (definition, index) => {
+
+                  const field =
+                    fields?.[definition.key];
+
+                  const value =
+                    field?.value;
+
+                  const confidence =
+                    field?.confidence ?? 0;
+
+                  // IMPORTANT:
+                  // Match the exact key returned
+                  // by the FastAPI backend.
+
+                  const check =
+                    checks.find(
+                      (item) =>
+                        item.key ===
+                        definition.key
+                    );
+
+                  let status;
+
+                  if (check?.status) {
+                    status = check.status;
+                  } else if (value) {
+                    status =
+                      confidence >= 0.8
+                        ? "PASS"
+                        : "REVIEW";
+                  } else {
+                    status = "NOT DETECTED";
+                  }
+
+                  return (
+                    <div
+                      className="field-row"
+                      key={definition.key}
+                    >
+
+                      <div className="field-number">
+
+                        {String(index + 1).padStart(
+                          2,
+                          "0"
+                        )}
+
+                      </div>
+
+                      <div className="field-label">
+
+                        {definition.label}
+
+                      </div>
+
+                      <div className="field-value">
+
+                        {value || "—"}
+
+                      </div>
+
+                      <div className="field-confidence">
+
+                        {value
+                          ? `${Math.round(
+                              confidence * 100
+                            )}%`
+                          : "—"}
+
+                      </div>
+
+                      <div>
+
+                        <span
+                          className={`status-pill ${statusClass(
+                            status
+                          )}`}
+                        >
+                          {status}
+                        </span>
+
+                      </div>
+
+                    </div>
+                  );
+                }
+              )}
+
+            </div>
+
+          </div>
+
+
+          {/* ====================================================
+              COMPLIANCE CHECKS
+          ==================================================== */}
+
+          <div className="report-block">
+
+            <div className="block-heading">
+
+              <span>
+                03
+              </span>
+
+              COMPLIANCE CHECKS
+
+            </div>
+
+            <h2>
+              VERIFICATION MATRIX
+            </h2>
+
+            <div className="checks-list">
+
+              {checks.length > 0 ? (
+
+                checks.map(
+                  (check, index) => (
+
+                    <div
+                      className="compliance-row"
+                      key={`${
+                        check.key ||
+                        check.field
+                      }-${index}`}
+                    >
+
+                      <div className="compliance-number">
+
+                        {String(index + 1).padStart(
+                          2,
+                          "0"
+                        )}
+
+                      </div>
+
+                      <div className="compliance-field">
+
+                        <strong>
+                          {check.field}
+                        </strong>
+
+                        <span>
+
+                          {check.value ||
+                            "No reliable value detected"}
+
+                        </span>
+
+                      </div>
+
+                      <div className="compliance-reason">
+
+                        {check.reason ||
+                          check.rule ||
+                          "Manual verification required."}
+
+                      </div>
+
+                      <span
+                        className={`status-pill ${statusClass(
+                          check.status
+                        )}`}
+                      >
+
+                        {check.status}
+
+                      </span>
+
+                    </div>
+
+                  )
+
+                )
+
+              ) : (
+
+                <div className="compliance-row">
+
+                  <div className="compliance-number">
+                    —
+                  </div>
+
+                  <div className="compliance-field">
+
+                    <strong>
+                      NO ANALYSIS AVAILABLE
+                    </strong>
+
+                    <span>
+                      Upload and analyze a
+                      product label.
+                    </span>
+
+                  </div>
+
+                </div>
+
+              )}
+
+            </div>
+
+          </div>
+
+
+          {/* ====================================================
+              RAW OCR
+          ==================================================== */}
+
+          <div className="report-block">
+
+            <div className="block-heading">
+
+              <span>
+                04
+              </span>
+
+              RAW OCR OUTPUT
+
+            </div>
+
+            <h2>
+              EXTRACTED TEXT
+            </h2>
+
+            <div className="ocr-block">
+
+              <pre>
+
+                {ocrText ||
+                  "NO OCR OUTPUT AVAILABLE. RUN AN ANALYSIS TO VIEW RAW EXTRACTED TEXT."}
+
+              </pre>
+
+            </div>
+
+          </div>
+
+
+          {/* ====================================================
+              HUMAN REVIEW
+          ==================================================== */}
+
+          <div className="human-review-panel">
+
+            <div className="verdict-icon">
+              !
             </div>
 
             <div>
-              <strong>
-                SHIELD<span>X</span>
-              </strong>
+
+              <span>
+                HUMAN VERIFICATION REQUIRED
+              </span>
 
               <p>
-                Compliance intelligence for packaged-product
-                labels.
+
+                ShieldX provides AI-assisted
+                inspection and should not be
+                treated as a final legal or
+                regulatory determination. Review
+                extracted values against the
+                physical label and applicable
+                regulations before making a
+                compliance decision.
+
               </p>
+
             </div>
+
           </div>
+
+        </div>
+
+      </section>
+
+
+      {/* ======================================================
+          HOW IT WORKS
+      ====================================================== */}
+
+      <section
+        id="how-it-works"
+        className="system-section"
+      >
+
+        <div className="section-container">
+
+          <div className="system-heading">
+
+            <div>
+
+              <div className="section-index">
+                03 / SYSTEM
+              </div>
+
+              <div className="section-kicker">
+                HOW SHIELDX WORKS
+              </div>
+
+              <h2>
+
+                FROM LABEL
+                <br />
+                TO INTELLIGENCE.
+
+              </h2>
+
+            </div>
+
+            <p>
+
+              A focused inspection pipeline
+              designed to turn unstructured
+              product-label information into
+              actionable compliance signals.
+
+            </p>
+
+          </div>
+
+
+          <div className="architecture">
+
+            <ArchitectureCard
+              number="01"
+              title="CAPTURE"
+              text="Upload a clear product-label image. ShieldX prepares the visual input for automated inspection."
+            />
+
+            <ArchitectureCard
+              number="02"
+              title="EXTRACT"
+              text="OCR identifies text across multiple image-processing passes to recover important label information."
+            />
+
+            <ArchitectureCard
+              number="03"
+              title="STRUCTURE"
+              text="Detected information is organized into compliance-relevant fields such as license, MRP and quantity."
+            />
+
+            <ArchitectureCard
+              number="04"
+              title="VERIFY"
+              text="Each detected field is evaluated for confidence and rule-level verification status."
+            />
+
+          </div>
+
+
+          <div className="capability-strip">
+
+            <span>
+              OCR ENGINE
+            </span>
+
+            <span>
+              FIELD EXTRACTION
+            </span>
+
+            <span>
+              CONFIDENCE SCORING
+            </span>
+
+            <span>
+              RULE VALIDATION
+            </span>
+
+            <span>
+              HUMAN REVIEW
+            </span>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      {/* ======================================================
+          FOOTER
+      ====================================================== */}
+
+      <footer className="footer">
+
+        <div className="footer-container">
+
+          <div className="footer-brand">
+
+            <div className="brand-symbol">
+
+              <span />
+              <span />
+              <span />
+
+            </div>
+
+            <div>
+
+              <div className="brand-name">
+                SHIELD<span>X</span>
+              </div>
+
+              <div className="brand-subtitle">
+                COMPLIANCE INTELLIGENCE
+              </div>
+
+            </div>
+
+          </div>
+
 
           <div className="footer-status">
-            <span>SYSTEM STATUS</span>
-            <strong>● OPERATIONAL</strong>
+
+            <span className="system-dot" />
+
+            OCR ENGINE ONLINE
+
           </div>
 
-          <div className="footer-bottom">
-            <span>
-              SHIELDX / COMPLIANCE INTELLIGENCE
-            </span>
-
-            <span>
-              AI-ASSISTED / HUMAN VERIFIED
-            </span>
-          </div>
         </div>
+
+
+        <div className="footer-bottom">
+
+          <span>
+            SHIELDX / AI-ASSISTED INSPECTION
+          </span>
+
+          <span>
+            SEE WHAT THE LABEL HIDES.
+          </span>
+
+          <span>
+            © 2026
+          </span>
+
+        </div>
+
       </footer>
-    </div>
+
+    </main>
   );
 }
