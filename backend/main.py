@@ -927,10 +927,10 @@ def run_ocr(image):
     variants = preprocess_image(
         image
     )
-
-     psm_modes = [
+    psm_modes = [
         6,
     ]
+    results = []
 
     results = []
 
