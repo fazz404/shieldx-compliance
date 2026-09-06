@@ -791,14 +791,9 @@ export default function App() {
                       OR CLICK TO BROWSE
                     </p>
 
-                    <p style={{ fontSize: "0.75rem", opacity: 0.6, marginTop: "8px" }}>
+                                        <p style={{ fontSize: "0.75rem", opacity: 0.6, marginTop: "8px" }}>
                       For best results: use a flat, well-lit, straight-on photo with no glare.
                     </p>
-
-<p style={{ fontSize: "0.75rem", opacity: 0.6, marginTop: "8px" }}>
-  For best results: use a flat, well-lit, straight-on photo with no glare.
-</p>
-
                   </div>
 
                 </div>
