@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./index.css";
+import jsPDF from "jspdf";
 
 const API_URL = "https://shieldx-api-dngk.onrender.com/upload";
 
@@ -366,6 +367,81 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+    // ==========================================================
+  // DOWNLOAD PDF REPORT
+  // ==========================================================
+
+  const downloadReport = () => {
+    if (!compliance) {
+      setError("RUN AN ANALYSIS BEFORE DOWNLOADING A REPORT.");
+      return;
+    }
+
+    const doc = new jsPDF();
+
+    let y = 20;
+
+    doc.setFontSize(16);
+    doc.text("ShieldX Compliance Inspection Report", 14, y);
+
+    y += 10;
+    doc.setFontSize(10);
+    doc.text(`File: ${image?.name || "N/A"}`, 14, y);
+
+    y += 6;
+    doc.text(`Overall Status: ${overallStatus}`, 14, y);
+
+    y += 6;
+    doc.text(
+      `Verification Coverage: ${coverage}% (${passed} passed, ${review} review, ${failed} failed, ${notDetected} not detected)`,
+      14,
+      y
+    );
+
+    y += 12;
+    doc.setFontSize(12);
+    doc.text("Extracted Fields:", 14, y);
+
+    y += 8;
+    doc.setFontSize(10);
+
+    fieldDefinitions.forEach((definition) => {
+      const field = fields?.[definition.key];
+      const value = field?.value || "NOT DETECTED";
+
+      doc.text(`${definition.label}: ${value}`, 14, y);
+      y += 6;
+
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+    });
+
+    y += 6;
+    doc.setFontSize(12);
+    doc.text("Raw OCR Text:", 14, y);
+
+    y += 8;
+    doc.setFontSize(9);
+
+    const splitText = doc.splitTextToSize(
+      ocrText || "No OCR output available.",
+      180
+    );
+
+    splitText.forEach((line) => {
+      if (y > 280) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.text(line, 14, y);
+      y += 5;
+    });
+
+    doc.save(`shieldx-report-${image?.name || "output"}.pdf`);
   };
 
   // ==========================================================
@@ -1036,7 +1112,7 @@ export default function App() {
 
         <div className="section-container">
 
-          <div className="report-heading">
+                    <div className="report-heading">
 
             <div>
 
@@ -1058,13 +1134,27 @@ export default function App() {
 
             </div>
 
-            <div className="report-number">
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
 
-              SX
+              {compliance && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={downloadReport}
+                >
+                  DOWNLOAD PDF
+                </button>
+              )}
 
-              <span>
-                REPORT
-              </span>
+              <div className="report-number">
+
+                SX
+
+                <span>
+                  REPORT
+                </span>
+
+              </div>
 
             </div>
 
