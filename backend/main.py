@@ -28,6 +28,11 @@ else:
 # ============================================================
 # FASTAPI
 # ============================================================
+app = FastAPI(
+    title="ShieldX Compliance Intelligence",
+    version="1.0.0",
+)
+
 
 app.add_middleware(
     CORSMiddleware,
